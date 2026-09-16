@@ -1,0 +1,54 @@
+import type { FastifyInstance, FastifyRequest } from 'fastify'
+import { z } from 'zod'
+import type { Principal } from './domain.js'
+import { hashPassword, verifyPassword } from './password.js'
+import { hashSessionToken, newSessionToken, type SessionStore } from './sessions.js'
+import type { Role } from './domain.js'
+
+export type Authenticator = (request: FastifyRequest) => Promise<Principal | null>
+export const SESSION_COOKIE='spl_session'
+const SESSION_MS=180*24*60*60*1000
+const loginSchema=z.object({email:z.email().max(320).transform(value=>value.toLowerCase()),password:z.string().min(8).max(128)}).strict()
+let dummyHashPromise:Promise<string>|undefined
+const dummyHash=()=>dummyHashPromise??=(hashPassword('not-a-real-user-password'))
+
+export function sessionAuthenticator(store:SessionStore):Authenticator {
+  return async request=>{const token=request.cookies?.[SESSION_COOKIE];if(!token||token.length>100)return null;const principal=await store.findPrincipal(hashSessionToken(token),new Date());return principal?{userId:principal.userId,role:principal.role,unit:principal.unit}:null}
+}
+
+export type GoogleIdentity={email:string;name:string;emailVerified:boolean}
+export type GoogleVerifier=(credential:string)=>Promise<GoogleIdentity|null>
+const googleSchema=z.object({credential:z.string().min(100).max(10000)}).strict()
+const sessionResponse=(user:{id:string;email:string;displayName:string;role:Role;businessUnit:import('./domain.js').BusinessUnit|null})=>({userId:user.id,email:user.email,displayName:user.displayName,role:user.role,unit:user.businessUnit})
+
+export function registerAuthRoutes(app:FastifyInstance,store:SessionStore,verifyGoogle?:GoogleVerifier){
+  app.post('/api/auth/login',{config:{rateLimit:{max:5,timeWindow:'1 minute'}}},async(request,reply)=>{
+    const input=loginSchema.parse(request.body)
+    const user=await store.findUserByEmail(input.email)
+    const valid=await verifyPassword(input.password,user?.passwordHash??await dummyHash())
+    if(!user||!user.active||!valid)return reply.code(401).send({error:'Correo o contraseña incorrectos'})
+    const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)
+    await store.createSession(user.id,hashSessionToken(token),expiresAt)
+    reply.setCookie(SESSION_COOKIE,token,{httpOnly:true,sameSite:'strict',secure:process.env.NODE_ENV==='production',path:'/',maxAge:SESSION_MS/1000})
+    return {data:sessionResponse(user)}
+  })
+  app.post('/api/auth/google',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async(request,reply)=>{
+    if(!verifyGoogle)return reply.code(503).send({error:'Acceso con Google no configurado'})
+    const {credential}=googleSchema.parse(request.body)
+    const identity=await verifyGoogle(credential)
+    if(!identity?.emailVerified)return reply.code(401).send({error:'No se pudo verificar la cuenta de Google'})
+    const email=identity.email.trim().toLowerCase()
+    const allowed=new Set((process.env.GOOGLE_ALLOWED_EMAILS??'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean))
+    if(!allowed.has(email))return reply.code(403).send({error:'Esta cuenta no está autorizada'})
+    const adminEmail=(process.env.ADMIN_EMAIL??'').trim().toLowerCase()
+    const role:Role=email===adminEmail?'admin':'coordinator'
+    const user=await store.findOrCreateGoogleUser(email,identity.name.slice(0,160),role,role==='coordinator'?'5to Elemento':null)
+    if(!user.active)return reply.code(403).send({error:'Esta cuenta no está autorizada'})
+    const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)
+    await store.createSession(user.id,hashSessionToken(token),expiresAt)
+    reply.setCookie(SESSION_COOKIE,token,{httpOnly:true,sameSite:'strict',secure:process.env.NODE_ENV==='production',path:'/',maxAge:SESSION_MS/1000})
+    return {data:sessionResponse(user)}
+  })
+  app.get('/api/auth/me',async(request)=>{const principal=await store.findPrincipal(hashSessionToken(request.cookies[SESSION_COOKIE]??''),new Date());return {data:principal}})
+  app.post('/api/auth/logout',async(request,reply)=>{const token=request.cookies[SESSION_COOKIE];if(token)await store.revokeSession(hashSessionToken(token));reply.clearCookie(SESSION_COOKIE,{path:'/'});return reply.code(204).send()})
+}

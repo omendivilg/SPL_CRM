@@ -1,0 +1,8 @@
+import {describe,expect,it} from 'vitest'
+import {DevelopmentStore} from './dev.js'
+
+describe('development store',()=>{
+  it('creates the administrator once and preserves the same account',async()=>{const store=new DevelopmentStore();const first=await store.findOrCreateGoogleUser('omendivilg@gmail.com','Oscar','admin',null);const second=await store.findOrCreateGoogleUser('omendivilg@gmail.com','Changed','coordinator','5to Elemento');expect(second.id).toBe(first.id);expect(store.users).toHaveLength(1);expect(second.role).toBe('admin')})
+  it('rejects expired and revoked local sessions',async()=>{const store=new DevelopmentStore();const user=await store.findOrCreateGoogleUser('omendivilg@gmail.com','Oscar','admin',null);await store.createSession(user.id,'expired',new Date(0));expect(await store.findPrincipal('expired',new Date())).toBeNull();await store.createSession(user.id,'active',new Date(Date.now()+10000));await store.revokeSession('active');expect(await store.findPrincipal('active',new Date())).toBeNull()})
+  it('keeps coordinator event reads scoped to 5to Elemento',async()=>{const store=new DevelopmentStore();const admin={userId:'a',role:'admin',unit:null} as const;const base={clientPhone:null,eventDate:'2026-09-14',operationalStatus:'Pendiente' as const,operationalNotes:null,payrollBudget:'0.00',extraExpenseBudget:'0.00'};await store.create({...base,businessUnit:'SPL',clientName:'A',venue:'A'},admin);await store.create({...base,businessUnit:'5to Elemento',clientName:'B',venue:'B'},admin);expect(await store.list({userId:'c',role:'coordinator',unit:'5to Elemento'})).toHaveLength(1)})
+})
