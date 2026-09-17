@@ -5,17 +5,24 @@ const initialEvent = {id:'11111111-1111-4111-8111-111111111111',businessUnit:'SP
 const owner={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',email:'owner@spl.mx',displayName:'Oscar Méndez',role:'owner'}
 const coordinator={id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',email:'coord@spl.mx',displayName:'Coordinación SPL',role:'coordinator'}
 
-async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof owner;requireLogin?:boolean}={}) {
+async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof owner;requireLogin?:boolean;testLogin?:boolean}={}) {
   const events=[initialEvent]; let listAttempts=0
-  const payments:any[]=[];const expenses:any[]=[];const payroll:any[]=[]
+  const payments:any[]=[];const expenses:any[]=[];const payroll:any[]=[];const workers:any[]=[];const templates:any[]=[]
   let authenticated=!options.requireLogin
   await page.route('**/api/**',async(route:Route)=>{
     const request=route.request(),url=new URL(request.url()),method=request.method()
     if(url.pathname==='/api/auth/me'&&method==='GET')return route.fulfill(authenticated?{status:200,json:{data:options.user??owner}}:{status:401,json:{error:'unauthorized'}})
     if(url.pathname==='/api/auth/login'&&method==='POST'){authenticated=true;return route.fulfill({status:200,json:{data:options.user??owner}})}
     if(url.pathname==='/api/auth/google'&&method==='POST'){authenticated=true;return route.fulfill({status:200,json:{data:{...owner,role:'admin'}}})}
+    if(url.pathname==='/api/auth/test-login/config'&&method==='GET')return route.fulfill({status:200,json:{data:{enabled:options.testLogin===true}}})
+    if(url.pathname==='/api/auth/test-login'&&method==='POST'){authenticated=true;return route.fulfill({status:200,json:{data:{...owner,role:'admin'}}})}
     if(url.pathname==='/api/auth/logout'&&method==='POST'){authenticated=false;return route.fulfill({status:204})}
     if(url.pathname==='/api/reports/monthly.xlsx'&&method==='GET')return route.fulfill({status:200,headers:{'content-type':'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'},body:Buffer.from('PK mock workbook')})
+    if(url.pathname==='/api/workers'&&method==='GET')return route.fulfill({status:200,json:{data:workers}})
+    if(url.pathname==='/api/workers'&&method==='POST'){const body=request.postDataJSON(),created={id:'99999999-9999-4999-8999-999999999999',name:body.name,active:true};workers.push(created);return route.fulfill({status:201,json:{data:created}})}
+    if(url.pathname==='/api/payroll-templates'&&method==='GET')return route.fulfill({status:200,json:{data:templates}})
+    if(url.pathname==='/api/payroll-templates'&&method==='POST'){const body=request.postDataJSON(),created={id:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',...body};templates.push(created);return route.fulfill({status:201,json:{data:created}})}
+    if(url.pathname.startsWith('/api/payroll-templates/')&&method==='PUT'){const body=request.postDataJSON(),index=templates.findIndex(item=>url.pathname.endsWith(item.id)),updated={id:templates[index].id,...body};templates[index]=updated;return route.fulfill({status:200,json:{data:updated}})}
     if(url.pathname==='/api/payroll'&&method==='GET')return route.fulfill({status:200,json:{data:payroll}})
     if(url.pathname==='/api/payroll'&&method==='POST'){const body=request.postDataJSON(),laborCost=(Number(body.baseCost)+Number(body.additions)).toFixed(2),netPay=(Number(laborCost)-Number(body.deductions)).toFixed(2),created={...body,id:'77777777-7777-4777-8777-777777777777',laborCost,netPay,allocationTotal:laborCost,paidAmount:'0.00',outstandingAmount:netPay};payroll.push(created);return route.fulfill({status:201,json:{data:created}})}
     if(/^\/api\/payroll\/[^/]+\/settlements$/.test(url.pathname)&&method==='POST'){const body=request.postDataJSON(),entry=payroll.find(item=>url.pathname.includes(item.id));if(!entry)return route.fulfill({status:404,json:{error:'missing'}});entry.paidAmount=(Number(entry.paidAmount)+Number(body.amount)).toFixed(2);entry.outstandingAmount=(Number(entry.netPay)-Number(entry.paidAmount)).toFixed(2);return route.fulfill({status:201,json:{data:{...body,id:'88888888-8888-4888-8888-888888888888',payrollEntryId:entry.id,paidAmount:entry.paidAmount,outstandingAmount:entry.outstandingAmount,createdAt:new Date().toISOString()}}})}
@@ -27,6 +34,7 @@ async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof o
     if(url.pathname==='/api/events'&&method==='POST'){
       const body=request.postDataJSON(); const created={...body,id:'33333333-3333-4333-8333-333333333333',version:1};events.unshift(created);return route.fulfill({status:201,json:{data:created}})
     }
+    if(/^\/api\/events\/[^/]+\/budget$/.test(url.pathname)&&method==='PATCH'){const body=request.postDataJSON();initialEvent.payrollBudget=body.payrollBudget;return route.fulfill({status:200,json:{data:initialEvent}})}
     if(url.pathname.endsWith('/expenses')&&method==='GET')return route.fulfill({status:200,json:{data:expenses}})
     if(url.pathname.endsWith('/expenses')&&method==='POST'){const body=request.postDataJSON();const created={...body,id:'44444444-4444-4444-8444-444444444444',eventId:initialEvent.id,paidAmount:'0.00',version:1};expenses.push(created);return route.fulfill({status:201,json:{data:created}})}
     if(url.pathname.endsWith('/payments')&&method==='GET')return route.fulfill({status:200,json:{data:payments}})
@@ -110,31 +118,51 @@ test('creates the administrator session through the rendered Google button',asyn
   await expect(page.getByRole('heading',{name:'Buen día, Oscar'})).toBeVisible()
 })
 
+test('enters the application through local test mode without Google',async({page})=>{
+  await mockApi(page,{requireLogin:true,testLogin:true})
+  await page.goto('/')
+  await page.getByRole('button',{name:'Entrar en modo de pruebas'}).click()
+  await expect(page.getByRole('heading',{name:'Buen día, Oscar'})).toBeVisible()
+})
+
 test('records a customer payment and shows the reconciled balance',async({page})=>{
   await mockApi(page)
   await page.goto('/')
   await page.getByRole('button',{name:'Eventos'}).click()
-  page.once('dialog',dialog=>dialog.accept('25000'))
   await page.getByRole('button',{name:'Registrar abono'}).click()
+  await page.getByRole('dialog',{name:'Registrar abono'}).getByLabel('Monto MXN').fill('25000')
+  await page.getByRole('button',{name:'Guardar abono'}).click()
   await expect(page.getByText('+$25,000.00')).toBeVisible()
   await expect(page.getByText('$100,000.00').first()).toBeVisible()
   await page.screenshot({path:'../outputs/spl-payment-workflow.png',fullPage:true})
 })
 
-test('creates and partially settles a named expense without exceeding its total',async({page})=>{
+test('creates a named expense and marks only its full balance as paid',async({page})=>{
   await mockApi(page)
   await page.goto('/')
   await page.getByRole('button',{name:'Eventos'}).click()
-  const answers=['Transporte adicional','1000','400']
-  page.on('dialog',dialog=>dialog.accept(answers.shift()??''))
   await page.getByRole('button',{name:'Agregar'}).click()
+  const dialog=page.getByRole('dialog',{name:'Agregar gasto extra'})
+  await dialog.getByLabel('Nombre del gasto').fill('Transporte adicional')
+  await dialog.getByLabel('Monto MXN').fill('1000')
+  await dialog.getByRole('button',{name:'Guardar'}).click()
   await expect(page.getByText('Transporte adicional')).toBeVisible()
-  await page.getByRole('button',{name:'Registrar pago'}).click()
-  await expect(page.getByText('Pendiente $600.00')).toBeVisible()
+  await page.getByRole('button',{name:'Marcar como pagado'}).click()
+  await expect(page.getByText('Pagado')).toBeVisible()
 })
 
-test('reconciles a payroll record, its allocation and a partial payment',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Empleado').fill('Andrea López');await page.getByLabel('Inicio').fill('2026-09-01');await page.getByLabel('Fin').fill('2026-09-15');await page.getByLabel('Costo base').fill('1000.10');await page.getByLabel('Adiciones').fill('200.20');await page.getByLabel('Deducciones').fill('50.05');await page.getByLabel('Monto 1').fill('1200.30');await page.getByRole('button',{name:'Guardar nómina'}).click();await expect(page.getByText('Andrea López')).toBeVisible();await expect(page.getByText('$1,200.30')).toBeVisible();await expect(page.getByText('$1,150.25',{exact:true})).toBeVisible();page.once('dialog',dialog=>dialog.accept('500.25'));await page.getByRole('button',{name:'Registrar pago'}).click();await expect(page.getByText('Pendiente $650.00')).toBeVisible();await page.screenshot({path:'../outputs/spl-payroll-workflow.png',fullPage:true})})
+test('updates an event payroll budget after the event was created',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Eventos'}).click();await page.getByRole('button',{name:'Modificar presupuesto'}).click();const dialog=page.getByRole('dialog',{name:'Modificar presupuesto de nómina'});await dialog.getByLabel('Presupuesto MXN').fill('45000');await dialog.getByRole('button',{name:'Guardar'}).click();await expect(page.getByText('Presupuesto $45,000.00')).toBeVisible()})
 
-test('allocates one payroll cost across warehouse and event work',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Empleado').fill('Luis Torres');await page.getByLabel('Inicio').fill('2026-09-01');await page.getByLabel('Fin').fill('2026-09-15');await page.getByLabel('Costo base').fill('1200');await page.getByLabel('Monto 1').fill('400');await page.getByRole('button',{name:'Agregar asignación'}).click();await page.getByLabel('Destino 2').selectOption(initialEvent.id);await page.getByLabel('Monto 2').fill('800');await page.getByRole('button',{name:'Guardar nómina'}).click();await expect(page.getByText('Luis Torres')).toBeVisible();await expect(page.getByText('$1,200.00').first()).toBeVisible()})
+test('reconciles a payroll worker with automatic allocation and full payment',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Empleado').fill('Andrea López');await page.getByLabel('Inicio').fill('2026-09-01');await page.getByLabel('Fin').fill('2026-09-15');await page.getByLabel('Costo base').fill('1000.10');await page.getByLabel('Adiciones').fill('200.20');await page.getByLabel('Deducciones').fill('50.05');await expect(page.getByLabel('Monto 1')).toHaveValue('1200.30');await page.getByRole('button',{name:'Guardar nómina completa'}).click();await expect(page.getByText('Andrea López')).toBeVisible();await expect(page.getByText('$1,200.30')).toBeVisible();await page.getByRole('button',{name:'Pagar saldo completo'}).click();await expect(page.getByText('Pendiente $0.00')).toBeVisible();await page.screenshot({path:'../outputs/spl-payroll-workflow.png',fullPage:true})})
 
-test('downloads the selected monthly Excel report',async({page})=>{await mockApi(page);await page.goto('/');page.once('dialog',dialog=>dialog.accept('2026-09'));const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Exportar mes'}).click();const download=await downloadPromise;expect(download.suggestedFilename()).toBe('SPL-reporte-2026-09.xlsx')})
+test('saves two workers with different pay in one payroll capture',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Inicio').fill('2026-09-01');await page.getByLabel('Fin').fill('2026-09-15');await page.getByLabel('Empleado').fill('Andrea');await page.getByLabel('Costo base').fill('500');await page.getByRole('button',{name:'Agregar trabajador a esta nómina'}).click();await page.getByLabel('Empleado').fill('Luis');await page.getByLabel('Costo base').fill('750');await page.getByRole('button',{name:'Guardar nómina completa'}).click();await expect(page.getByText('Andrea').first()).toBeVisible();await expect(page.getByText('Luis').first()).toBeVisible();await expect(page.getByText('$500.00').first()).toBeVisible();await expect(page.getByText('$750.00').first()).toBeVisible()})
+
+test('allocates one payroll cost across warehouse and event work',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Empleado').fill('Luis Torres');await page.getByLabel('Inicio').fill('2026-09-01');await page.getByLabel('Fin').fill('2026-09-15');await page.getByLabel('Costo base').fill('1200');await page.getByLabel('Monto 1').fill('400');await page.getByRole('button',{name:'Dividir en otro destino'}).click();await page.getByLabel('Destino 2').selectOption(initialEvent.id);await page.getByLabel('Monto 2').fill('800');await page.getByRole('button',{name:'Guardar nómina completa'}).click();await expect(page.getByText('Luis Torres')).toBeVisible();await expect(page.getByText('$1,200.00').first()).toBeVisible()})
+
+test('downloads the selected monthly Excel report',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Exportar mes'}).click();await page.getByRole('dialog',{name:'Exportar reporte mensual'}).getByLabel('Mes del reporte').fill('2026-09');const downloadPromise=page.waitForEvent('download');await page.getByRole('button',{name:'Descargar Excel'}).click();const download=await downloadPromise;expect(download.suggestedFilename()).toBe('SPL-reporte-2026-09.xlsx')})
+
+test('shows reconciled finance and editable settings pages',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Finanzas'}).click();await expect(page.getByRole('heading',{name:'Finanzas'})).toBeVisible();await expect(page.getByRole('heading',{name:'Detalle por evento'})).toBeVisible();await expect(page.getByText('Cliente inicial').first()).toBeVisible();await page.screenshot({path:'../outputs/spl-finance-desktop.png',fullPage:true});await page.getByRole('button',{name:'Configuración'}).click();await expect(page.getByRole('heading',{name:'Configuración'})).toBeVisible();await expect(page.getByText('owner@spl.mx')).toBeVisible();await page.getByLabel('Unidad predeterminada').selectOption('5to Elemento');await page.getByRole('button',{name:'Guardar cambios'}).click();await expect(page.getByRole('button',{name:'Guardado'})).toBeVisible();await page.screenshot({path:'../outputs/spl-settings-desktop.png',fullPage:true})})
+
+test('saves workers and reuses an editable payroll template',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Nombre del nuevo trabajador').fill('Andrea López');await page.getByRole('button',{name:'Guardar trabajador'}).click();await expect(page.getByLabel('Empleado')).toHaveValue('Andrea López');await page.getByLabel('Costo base').fill('1000');await page.getByLabel('Nombre de plantilla').fill('Nómina semanal Andrea');await page.getByRole('button',{name:'Guardar plantilla'}).click();await page.getByRole('button',{name:'Eventos'}).click();await page.getByRole('button',{name:'Nómina'}).click();await page.getByLabel('Plantilla reutilizable').selectOption({label:'Nómina semanal Andrea'});await expect(page.getByLabel('Empleado')).toHaveValue('Andrea López');await expect(page.getByLabel('Costo base')).toHaveValue('1000.00');await expect(page.getByLabel('Monto 1')).toHaveValue('1000.00');await page.screenshot({path:'../outputs/spl-payroll-directory.png',fullPage:true})})
+
+test('keeps finance navigation usable at iPad width',async({page})=>{await page.setViewportSize({width:820,height:1180});await mockApi(page);await page.goto('/');const sidebar=page.locator('.sidebar'),closedBox=await sidebar.boundingBox();expect(closedBox&&closedBox.x+closedBox.width<=0).toBe(true);await page.locator('.menu-button').click();await expect(sidebar).toHaveClass(/open/);await page.getByRole('button',{name:'Finanzas'}).click();await expect(page.getByRole('heading',{name:'Finanzas'})).toBeVisible();await expect.poll(async()=>{const box=await sidebar.boundingBox();return Boolean(box&&box.x+box.width<=0)}).toBe(true);expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true);await page.screenshot({path:'../outputs/spl-finance-ipad.png',fullPage:true})})

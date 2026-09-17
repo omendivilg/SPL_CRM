@@ -18,6 +18,8 @@ export type ApiExpense = { id:string;eventId:string;name:string;category:string;
 export type ApiPayment={id:string;eventId:string;transactionDate:string;amount:string;kind:'payment'|'refund';idempotencyKey:string;createdAt:string}
 export type ApiSettlement={id:string;expenseId:string;paymentDate:string;amount:string;idempotencyKey:string;createdAt:string;paidAmount:string}
 export type ApiPayroll={id:string;employeeName:string;periodStart:string;periodEnd:string;baseCost:string;additions:string;deductions:string;laborCost:string;netPay:string;allocationTotal:string;paidAmount:string;outstandingAmount:string;allocations:Array<{scope:'event'|'warehouse';eventId?:string|null;amount:string}>}
+export type ApiWorker={id:string;name:string;active:boolean}
+export type ApiPayrollTemplate={id:string;name:string;employeeId?:string|null;baseCost:string;additions:string;deductions:string;allocations:ApiPayroll['allocations']}
 export type CreateEventInput = Omit<ApiEvent,'id'|'version'>
 export type CreateExpenseInput = { name:string;category:string;expenseDate:string;amount:string;supplier?:string|null;notes?:string|null;dueDate?:string|null }
 export type SessionUser={userId:string;email:string;displayName:string;role:'admin'|'owner'|'coordinator';unit:ApiBusinessUnit|null}
@@ -56,6 +58,7 @@ async function requestFile(path:string){const controller=new AbortController(),t
 export const eventApi = {
   list:()=>request<ApiEvent[]>('/api/events'),
   create:(input:CreateEventInput)=>request<ApiEvent>('/api/events',{method:'POST',body:JSON.stringify(input)},false),
+  updatePayrollBudget:(eventId:string,payrollBudget:string)=>request<ApiEvent>(`/api/events/${encodeURIComponent(eventId)}/budget`,{method:'PATCH',body:JSON.stringify({payrollBudget})},false),
   listExpenses:(eventId:string)=>request<ApiExpense[]>(`/api/events/${encodeURIComponent(eventId)}/expenses`),
   addExpense:(eventId:string,input:CreateExpenseInput)=>request<ApiExpense>(`/api/events/${encodeURIComponent(eventId)}/expenses`,{method:'POST',body:JSON.stringify(input)},false),
   listPayments:(eventId:string)=>request<ApiPayment[]>(`/api/events/${encodeURIComponent(eventId)}/payments`),
@@ -68,5 +71,17 @@ export const authApi={
   google:(credential:string)=>request<SessionUser>('/api/auth/google',{method:'POST',body:JSON.stringify({credential})},false),
   logout:()=>requestVoid('/api/auth/logout',{method:'POST'}),
 }
+export type DesktopGoogleStatus={status:'pending'}|{status:'complete';user:SessionUser}
+export const desktopGoogleApi={
+  config:()=>request<{enabled:boolean}>('/api/auth/google/desktop/config',{},false),
+  start:()=>request<{flowId:string}>('/api/auth/google/desktop/start',{method:'POST'},false),
+  status:(flowId:string)=>request<DesktopGoogleStatus>(`/api/auth/google/desktop/status?flowId=${encodeURIComponent(flowId)}`,{},false),
+}
+export const testLoginApi={
+  config:()=>request<{enabled:boolean}>('/api/auth/test-login/config',{},false),
+  login:()=>request<SessionUser>('/api/auth/test-login',{method:'POST'},false),
+}
 export const payrollApi={list:()=>request<ApiPayroll[]>('/api/payroll'),create:(input:Omit<ApiPayroll,'id'|'laborCost'|'netPay'|'allocationTotal'|'paidAmount'|'outstandingAmount'>)=>request<ApiPayroll>('/api/payroll',{method:'POST',body:JSON.stringify(input)},false),settle:(id:string,input:{paymentDate:string;amount:string;idempotencyKey:string})=>request<{paidAmount:string;outstandingAmount:string}>(`/api/payroll/${encodeURIComponent(id)}/settlements`,{method:'POST',body:JSON.stringify(input)},false)}
+export const payrollDirectoryApi={workers:()=>request<ApiWorker[]>('/api/workers'),createWorker:(name:string)=>request<ApiWorker>('/api/workers',{method:'POST',body:JSON.stringify({name})},false),templates:()=>request<ApiPayrollTemplate[]>('/api/payroll-templates'),createTemplate:(input:Omit<ApiPayrollTemplate,'id'>)=>request<ApiPayrollTemplate>('/api/payroll-templates',{method:'POST',body:JSON.stringify(input)},false),updateTemplate:(id:string,input:Omit<ApiPayrollTemplate,'id'>)=>request<ApiPayrollTemplate>(`/api/payroll-templates/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)},false)}
 export const reportApi={monthly:(month:string)=>requestFile(`/api/reports/monthly.xlsx?month=${encodeURIComponent(month)}`)}
+export const healthApi={status:async()=>{const response=await fetch(`${baseUrl}/health`);if(!response.ok)throw new ApiError('server',response.status);return response.json() as Promise<{status:string}>}}

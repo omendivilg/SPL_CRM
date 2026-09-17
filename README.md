@@ -1,56 +1,65 @@
 # SPL Control Financiero
 
-Initial application foundation for the Spanish-language SPL and 5to Elemento Windows system described in `../SPL_Implementation_Roadmap.md`.
+Aplicación en español para administrar eventos, finanzas y nómina de SPL y 5to Elemento.
 
-## Current slice
+## Funciones disponibles
 
-- Responsive owner dashboard in the approved dark SPL palette.
-- Business scope selector for consolidated SPL, SPL-owned events, and 5to Elemento.
-- Financial overview, cash-flow visualization, expense categories, upcoming events, and budget alerts.
-- Event workspace with unit filters, event selection, explainable cost totals, and named expense detail.
-- Event creation with client, venue, date, price, and budget fields.
-- API-backed event loading, creation, expense retrieval, loading states, empty states, and recoverable connection errors.
-- Safe automatic retry for read requests without automatically retrying writes that could create duplicates.
-- End-to-end verification for creating and reopening a pending-price reservation through the API.
-- Fastify backend with an injectable event repository and PostgreSQL implementation.
-- PostgreSQL migration for users, events, customer payments, expenses, settlements, payroll allocations, and audit history.
-- Server-side owner and coordinator scoping with separate financial and operational response shapes.
-- Unit and security tests for normal flows, boundaries, authorization failures, mass assignment, malformed input, oversized payloads, and injection-style strings.
-- Controlled demonstration data clearly marked as provisional.
+- Panel responsivo para propietario, escritorio e iPad.
+- Eventos, cobros, reembolsos, gastos, liquidaciones y reportes mensuales.
+- Directorio de trabajadores, plantillas reutilizables de nómina y asignación de costos.
+- Autenticación Google restringida, sesiones persistentes y permisos por rol.
+- Backend Fastify para PostgreSQL y backend local persistente para la aplicación Windows.
+- Instalador NSIS de Tauri con interfaz, backend y runtime incluidos.
+- Pruebas unitarias, de seguridad y de navegador para flujos normales, límites y cargas hostiles.
 
-The event interface now uses the central API and no longer stores event records in browser-local storage.
-Google authentication, persistent sessions, and role-specific access are implemented.
-Customer-payment workflows, exports, and Windows packaging remain to be implemented.
+La versión web de desarrollo usa la API local en el puerto 3001.
+La aplicación Tauri elige un puerto de bucle local disponible y conserva los datos en la carpeta privada de la aplicación.
 
-## Backend configuration
+## Configuración del backend central
 
-The production server requires `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `ADMIN_EMAIL`, and `GOOGLE_ALLOWED_EMAILS` environment variables.
-Apply `server/db/migrations/001_initial.sql` to a PostgreSQL database before starting the API.
-The API refuses to start when its database configuration is absent.
+El servidor central requiere las variables `DATABASE_URL`, `GOOGLE_CLIENT_ID`, `ADMIN_EMAIL` y `GOOGLE_ALLOWED_EMAILS`.
+Aplica las migraciones de `server/db/migrations` a PostgreSQL antes de iniciar esa API.
 
 ```powershell
 npm run start:server
 ```
 
-For local testing without PostgreSQL or Docker, `npm run dev` starts the interface and temporary in-memory backend together.
-Its data resets when the combined development process stops.
+Para desarrollo sin PostgreSQL ni Docker, `npm run dev` inicia la interfaz y un backend temporal en memoria.
 
 ```powershell
 npm run dev
 ```
 
-## Run locally
+## Ejecutar durante desarrollo
 
 ```powershell
 npm install
 npm run dev
 ```
 
-## Verify
+## Verificar
 
 ```powershell
 npm run build
 npm run build:server
 npm test
 npm run test:e2e
+cargo test --manifest-path src-tauri/Cargo.toml
 ```
+
+## Crear el instalador de Windows
+
+La aplicación de escritorio usa un cliente OAuth de tipo Desktop app.
+El acceso abre Google en el navegador del sistema y regresa a un callback local protegido con PKCE y estado aleatorio.
+Define `GOOGLE_DESKTOP_CLIENT_ID` antes de compilar para reemplazar el cliente configurado en la compilación.
+Las compilaciones locales y de escritorio habilitan un botón de modo de pruebas que crea una sesión administrativa sin Google.
+El servidor central de producción mantiene esta ruta deshabilitada.
+La versión 0.2.0 agrega presupuestos de nómina editables por evento, nóminas con varios trabajadores, liquidación total de gastos extra y modales propios para las operaciones financieras.
+
+```powershell
+$env:GOOGLE_DESKTOP_CLIENT_ID = "cliente.apps.googleusercontent.com"
+npm run desktop:build
+```
+
+El instalador se genera en `src-tauri/target/release/bundle/nsis`.
+La firma Authenticode se añadirá cuando SPL disponga de un certificado de firma de código.

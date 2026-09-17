@@ -19,18 +19,32 @@ export function sessionAuthenticator(store:SessionStore):Authenticator {
 export type GoogleIdentity={email:string;name:string;emailVerified:boolean}
 export type GoogleVerifier=(credential:string)=>Promise<GoogleIdentity|null>
 const googleSchema=z.object({credential:z.string().min(100).max(10000)}).strict()
-const sessionResponse=(user:{id:string;email:string;displayName:string;role:Role;businessUnit:import('./domain.js').BusinessUnit|null})=>({userId:user.id,email:user.email,displayName:user.displayName,role:user.role,unit:user.businessUnit})
+export const sessionResponse=(user:{id:string;email:string;displayName:string;role:Role;businessUnit:import('./domain.js').BusinessUnit|null})=>({userId:user.id,email:user.email,displayName:user.displayName,role:user.role,unit:user.businessUnit})
+const sessionCookieOptions=()=>({httpOnly:true as const,sameSite:'strict' as const,secure:process.env.NODE_ENV==='production'&&process.env.SPL_DESKTOP!=='1',path:'/',maxAge:SESSION_MS/1000})
+
+export async function issueSession(reply:import('fastify').FastifyReply,store:SessionStore,user:{id:string;email:string;displayName:string;role:Role;businessUnit:import('./domain.js').BusinessUnit|null}) {
+  const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)
+  await store.createSession(user.id,hashSessionToken(token),expiresAt)
+  reply.setCookie(SESSION_COOKIE,token,sessionCookieOptions())
+  return sessionResponse(user)
+}
 
 export function registerAuthRoutes(app:FastifyInstance,store:SessionStore,verifyGoogle?:GoogleVerifier){
+  const testLoginEnabled=process.env.SPL_ALLOW_TEST_LOGIN==='1'&&(process.env.SPL_DESKTOP==='1'||process.env.NODE_ENV!=='production')
+  app.get('/api/auth/test-login/config',async()=>({data:{enabled:testLoginEnabled}}))
+  app.post('/api/auth/test-login',{config:{rateLimit:{max:20,timeWindow:'1 minute'}}},async(_request,reply)=>{
+    if(!testLoginEnabled)return reply.code(404).send({error:'Ruta no encontrada'})
+    const email=(process.env.ADMIN_EMAIL??'omendivilg@gmail.com').trim().toLowerCase()
+    const user=await store.findOrCreateGoogleUser(email,'Oscar', 'admin',null)
+    if(!user.active)return reply.code(403).send({error:'Esta cuenta no está autorizada'})
+    return {data:await issueSession(reply,store,user)}
+  })
   app.post('/api/auth/login',{config:{rateLimit:{max:5,timeWindow:'1 minute'}}},async(request,reply)=>{
     const input=loginSchema.parse(request.body)
     const user=await store.findUserByEmail(input.email)
     const valid=await verifyPassword(input.password,user?.passwordHash??await dummyHash())
     if(!user||!user.active||!valid)return reply.code(401).send({error:'Correo o contraseña incorrectos'})
-    const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)
-    await store.createSession(user.id,hashSessionToken(token),expiresAt)
-    reply.setCookie(SESSION_COOKIE,token,{httpOnly:true,sameSite:'strict',secure:process.env.NODE_ENV==='production',path:'/',maxAge:SESSION_MS/1000})
-    return {data:sessionResponse(user)}
+    return {data:await issueSession(reply,store,user)}
   })
   app.post('/api/auth/google',{config:{rateLimit:{max:10,timeWindow:'1 minute'}}},async(request,reply)=>{
     if(!verifyGoogle)return reply.code(503).send({error:'Acceso con Google no configurado'})
@@ -44,10 +58,7 @@ export function registerAuthRoutes(app:FastifyInstance,store:SessionStore,verify
     const role:Role=email===adminEmail?'admin':'coordinator'
     const user=await store.findOrCreateGoogleUser(email,identity.name.slice(0,160),role,role==='coordinator'?'5to Elemento':null)
     if(!user.active)return reply.code(403).send({error:'Esta cuenta no está autorizada'})
-    const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)
-    await store.createSession(user.id,hashSessionToken(token),expiresAt)
-    reply.setCookie(SESSION_COOKIE,token,{httpOnly:true,sameSite:'strict',secure:process.env.NODE_ENV==='production',path:'/',maxAge:SESSION_MS/1000})
-    return {data:sessionResponse(user)}
+    return {data:await issueSession(reply,store,user)}
   })
   app.get('/api/auth/me',async(request)=>{const principal=await store.findPrincipal(hashSessionToken(request.cookies[SESSION_COOKIE]??''),new Date());return {data:principal}})
   app.post('/api/auth/logout',async(request,reply)=>{const token=request.cookies[SESSION_COOKIE];if(token)await store.revokeSession(hashSessionToken(token));reply.clearCookie(SESSION_COOKIE,{path:'/'});return reply.code(204).send()})

@@ -88,6 +88,20 @@ CREATE TABLE payroll_settlements (
   idempotency_key varchar(100) NOT NULL UNIQUE, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now()
 );
 
+CREATE TABLE workers (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(160) NOT NULL,
+  active boolean NOT NULL DEFAULT true, created_by text NOT NULL, created_at timestamptz NOT NULL DEFAULT now(),
+  UNIQUE (name)
+);
+
+CREATE TABLE payroll_templates (
+  id uuid PRIMARY KEY DEFAULT gen_random_uuid(), name varchar(120) NOT NULL UNIQUE,
+  employee_id uuid REFERENCES workers(id), base_cost numeric(14,2) NOT NULL CHECK (base_cost >= 0),
+  additions numeric(14,2) NOT NULL DEFAULT 0 CHECK (additions >= 0), deductions numeric(14,2) NOT NULL DEFAULT 0 CHECK (deductions >= 0),
+  allocations jsonb NOT NULL, created_by text NOT NULL, updated_by text, created_at timestamptz NOT NULL DEFAULT now(), updated_at timestamptz NOT NULL DEFAULT now(),
+  CHECK (jsonb_typeof(allocations) = 'array')
+);
+
 CREATE TABLE audit_log (
   id bigserial PRIMARY KEY, actor_user_id text NOT NULL, entity_type varchar(60) NOT NULL,
   entity_id text NOT NULL, action varchar(40) NOT NULL, old_values jsonb, new_values jsonb,

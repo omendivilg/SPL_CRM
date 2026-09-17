@@ -67,6 +67,7 @@ export const paymentSchema=z.object({
   idempotencyKey:z.uuid(),
 }).strict()
 export const settlementSchema=z.object({paymentDate:z.iso.date(),amount:money.refine(value=>Number(value)>0,'El monto debe ser mayor que cero'),idempotencyKey:z.uuid()}).strict()
+export const eventBudgetSchema=z.object({payrollBudget:money}).strict()
 
 export type CreateOwnerEvent = z.infer<typeof ownerEventSchema>
 export type CreateOperationalEvent = z.infer<typeof operationalEventSchema>

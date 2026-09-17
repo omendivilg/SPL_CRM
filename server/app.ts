@@ -6,10 +6,10 @@ import rateLimit from '@fastify/rate-limit'
 import { ZodError } from 'zod'
 import type { Authenticator } from './auth.js'
 import { registerAuthRoutes, type GoogleVerifier } from './auth.js'
-import { expenseSchema, operationalEventSchema, ownerEventSchema, paymentSchema, settlementSchema, toCoordinatorEvent } from './domain.js'
+import { eventBudgetSchema, expenseSchema, operationalEventSchema, ownerEventSchema, paymentSchema, settlementSchema, toCoordinatorEvent } from './domain.js'
 import type { EventRepository } from './repository.js'
 import type { SessionStore } from './sessions.js'
-import {calculatePayroll,type PayrollStore} from './payroll.js'
+import {calculatePayroll,templateInputSchema,workerInputSchema,type PayrollStore} from './payroll.js'
 import {createMonthlyReport,reportMonthSchema} from './report.js'
 
 export function buildApp(repository: EventRepository, authenticate: Authenticator, sessions?:SessionStore,verifyGoogle?:GoogleVerifier,payroll?:PayrollStore) {
@@ -20,7 +20,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
   app.register(rateLimit,{global:false})
   if(sessions)app.after(()=>registerAuthRoutes(app,sessions,verifyGoogle))
   app.addHook('onRequest', async (request, reply) => {
-    if (request.url === '/health' || request.url === '/api/auth/login' || request.url === '/api/auth/google') return
+    if (!request.url.startsWith('/api/') || request.url === '/api/auth/login' || request.url === '/api/auth/google' || request.url === '/api/auth/test-login' || request.url === '/api/auth/test-login/config' || request.url.startsWith('/api/auth/google/desktop/')) return
     const principal = await authenticate(request)
     if (!principal) return reply.code(401).send({ error: 'No autorizado' })
     request.principal = principal
@@ -49,6 +49,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
     const event = await repository.create(input, request.principal)
     return reply.code(201).send({ data: request.principal.role === 'coordinator' ? toCoordinatorEvent(event) : event })
   })
+  app.patch<{Params:{id:string}}>('/api/events/:id/budget',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const {payrollBudget}=eventBudgetSchema.parse(request.body);const event=await repository.updatePayrollBudget(request.params.id,payrollBudget,request.principal);if(!event)return reply.code(404).send({error:'Evento no encontrado'});return{data:event}})
   app.post<{Params:{id:string}}>('/api/events/:id/expenses', async (request, reply) => {
     if (request.principal.role === 'coordinator') return reply.code(403).send({ error: 'Acceso denegado' })
     const input = expenseSchema.parse(request.body)
@@ -66,6 +67,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
   app.get<{Params:{id:string}}>('/api/events/:id/payments',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const payments=await repository.listPayments(request.params.id,request.principal);if(!payments)return reply.code(404).send({error:'Evento no encontrado'});return {data:payments}})
   app.post<{Params:{id:string}}>('/api/expenses/:id/settlements',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const settlement=await repository.addSettlement(request.params.id,settlementSchema.parse(request.body),request.principal);if(!settlement)return reply.code(404).send({error:'Gasto no encontrado'});return reply.code(201).send({data:settlement})})
   if(payroll){app.get('/api/payroll',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return{data:await payroll.listPayroll()}});app.post('/api/payroll',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return reply.code(201).send({data:await payroll.createPayroll(calculatePayroll(request.body),request.principal)})});app.post<{Params:{id:string}}>('/api/payroll/:id/settlements',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const result=await payroll.settlePayroll(request.params.id,settlementSchema.parse(request.body),request.principal);if(!result)return reply.code(404).send({error:'Registro no encontrado'});return reply.code(201).send({data:result})})}
+  if(payroll){app.get('/api/workers',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return{data:await payroll.listWorkers()}});app.post('/api/workers',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return reply.code(201).send({data:await payroll.createWorker(workerInputSchema.parse(request.body),request.principal)})});app.get('/api/payroll-templates',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return{data:await payroll.listTemplates()}});app.post('/api/payroll-templates',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});return reply.code(201).send({data:await payroll.createTemplate(templateInputSchema.parse(request.body),request.principal)})});app.put<{Params:{id:string}}>('/api/payroll-templates/:id',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const result=await payroll.updateTemplate(request.params.id,templateInputSchema.parse(request.body),request.principal);if(!result)return reply.code(404).send({error:'Plantilla no encontrada'});return{data:result}})}
   if(payroll)app.get<{Querystring:{month?:string}}>('/api/reports/monthly.xlsx',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const month=reportMonthSchema.parse(request.query.month);const events=await repository.list(request.principal);const expenses=(await Promise.all(events.map(event=>repository.listExpenses(event.id,request.principal)))).flatMap(items=>items??[]);const payments=(await Promise.all(events.map(event=>repository.listPayments(event.id,request.principal)))).flatMap(items=>items??[]);const content=await createMonthlyReport({month,generatedAt:new Date(),events,expenses,payments,expenseSettlements:await repository.listSettlements(request.principal),payroll:await payroll.listPayroll(),payrollSettlements:await payroll.listPayrollSettlements()});return reply.header('Content-Type','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet').header('Content-Disposition',`attachment; filename="SPL-reporte-${month}.xlsx"`).send(content)})
   return app
 }
