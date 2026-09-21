@@ -3,10 +3,11 @@ import {Decimal} from 'decimal.js'
 import {z} from 'zod'
 import type {EventRecord} from './domain.js'
 import type {ExpenseRecord,PaymentRecord,SettlementRecord} from './repository.js'
+import { expenseProjection, type WeeklyState } from './weekly.js'
 import type {PayrollRecord,PayrollSettlement} from './payroll.js'
 
 export const reportMonthSchema=z.string().regex(/^\d{4}-(0[1-9]|1[0-2])$/,'Mes inválido')
-export type MonthlyReportData={month:string;generatedAt:Date;events:EventRecord[];expenses:ExpenseRecord[];payments:PaymentRecord[];expenseSettlements:SettlementRecord[];payroll:PayrollRecord[];payrollSettlements:PayrollSettlement[]}
+export type MonthlyReportData={month:string;generatedAt:Date;events:EventRecord[];expenses:ExpenseRecord[];payments:PaymentRecord[];expenseSettlements:SettlementRecord[];payroll:PayrollRecord[];payrollSettlements:PayrollSettlement[];weekly?:WeeklyState}
 const money=(value:string|null|undefined)=>new Decimal(value??0).toNumber()
 const safeText=(value:string|null|undefined)=>{const text=value??'';return /^[=+\-@]/.test(text)?`'${text}`:text}
 const currency='"$"#,##0.00;[Red]-"$"#,##0.00'
@@ -93,6 +94,26 @@ export async function createMonthlyReport(data:MonthlyReportData){
   monthlyPayrollSettlements.forEach(item=>movements.addRow({date:new Date(`${item.paymentDate}T00:00:00Z`),type:'Pago de nómina',in:null,out:money(item.amount),unit:'Compartido',related:item.payrollEntryId,description:safeText(payrollById.get(item.payrollEntryId)?.employeeName)}))
   movements.getColumn(1).numFmt='yyyy-mm-dd';movements.getColumn(3).numFmt=currency;movements.getColumn(4).numFmt=currency;finish(movements)
 
+  if (data.weekly) {
+    const selected = data.weekly.batches.filter(b => b.periodEnd.startsWith(month))
+    const batches = workbook.addWorksheet('Nóminas semanales')
+    configure(batches,'Nóminas semanales',period,[{header:'ID',key:'id',width:38},{header:'Inicio',key:'start',width:14},{header:'Fin',key:'end',width:14},{header:'Estado',key:'status',width:16},{header:'Trabajadores',key:'workers',width:15},{header:'Sueldos netos',key:'wages',width:18},{header:'Otros gastos',key:'extras',width:18},{header:'Total',key:'total',width:18},{header:'Fecha de pago',key:'paid',width:16}])
+    for (const batch of selected) batches.addRow({id:batch.id,start:batch.periodStart,end:batch.periodEnd,status:batch.status==='paid'?'Pagada':'No pagada',workers:batch.lines.length,wages:money(batch.wagesTotal),extras:money(batch.expensesTotal),total:money(batch.total),paid:batch.payments.findLast(p=>!p.reversedAt)?.paymentDate??''})
+    for (const column of [6,7,8]) batches.getColumn(column).numFmt=currency
+    finish(batches)
+    const extraSheet = workbook.addWorksheet('Gastos de nómina')
+    configure(extraSheet,'Gastos de nómina',period,[{header:'Nómina',key:'batch',width:38},{header:'Concepto',key:'name',width:28},{header:'Destino',key:'destination',width:28},{header:'Importe',key:'amount',width:18},{header:'Notas',key:'notes',width:40}])
+    for (const batch of selected) for (const extra of batch.expenses) extraSheet.addRow({batch:batch.id,name:safeText(extra.concept),destination:extra.scope==='warehouse'?'Almacén':safeText(eventById.get(extra.eventId??'')?.clientName),amount:money(extra.amount),notes:safeText(extra.notes)})
+    extraSheet.getColumn(4).numFmt=currency;finish(extraSheet)
+    const warehouseExtras = expenseProjection(data.weekly).filter(e=>e.scope==='warehouse'&&e.expenseDate.startsWith(month))
+    const warehouseTotal = warehouseExtras.reduce((sum,e)=>sum.plus(e.amount),new Decimal(0))
+    summary.addRow({concept:'Otros gastos de nómina - almacén',spl:warehouseTotal.div(2).toNumber(),fifth:warehouseTotal.div(2).toNumber(),total:warehouseTotal.toNumber()})
+    for (const batch of data.weekly.batches) for (const payment of batch.payments) {
+      if(payment.paymentDate.startsWith(month)) movements.addRow({date:new Date(`${payment.paymentDate}T00:00:00Z`),type:'Pago completo de nómina',in:null,out:money(payment.amount),unit:'Compartido',related:batch.id,description:`Semana ${batch.periodStart} al ${batch.periodEnd}`})
+      if(payment.reversedAt?.startsWith(month)) movements.addRow({date:new Date(payment.reversedAt),type:'Reversión de registro',in:money(payment.amount),out:null,unit:'Compartido',related:batch.id,description:safeText(payment.reversalReason)})
+    }
+    finish(movements)
+  }
   const buffer=await workbook.xlsx.writeBuffer()
   return Buffer.from(buffer)
 }

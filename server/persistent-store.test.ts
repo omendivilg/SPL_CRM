@@ -3,6 +3,8 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { PersistentDevelopmentStore } from './persistent-store.js'
+import { buildApp } from './app.js'
+import { saveWeekly } from './weekly.js'
 
 describe('persistent desktop store', () => {
   it('preserves a worker and session across application restarts', async () => {
@@ -27,4 +29,32 @@ describe('persistent desktop store', () => {
     await writeFile(oversized, 'x'.repeat(10 * 1024 * 1024 + 1))
     await expect(PersistentDevelopmentStore.open(oversized)).rejects.toThrow('límite permitido')
   })
+
+  it('keeps a confirmed weekly payroll after reopening the desktop store', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'spl-weekly-store-'))
+    const path = join(directory, 'data.json')
+    const first = await PersistentDevelopmentStore.open(path)
+    const worker = await first.createWorker({ name: 'Andrea López' })
+    await first.transactWeekly(state => saveWeekly(state, {
+      id: '11111111-1111-4111-8111-111111111111', version: 0, idempotencyKey: '22222222-2222-4222-8222-222222222222',
+      periodStart: '2026-09-14', periodEnd: '2026-09-20', expenses: [],
+      lines: [{ id: '33333333-3333-4333-8333-333333333333', employeeId: worker.id, baseCost: '1000.00', additions: '0.00', deductions: '0.00', allocations: [{ scope: 'warehouse', amount: '1000.00' }] }],
+    }, [worker], new Set(), { userId: 'owner', role: 'owner', unit: null }))
+    const second = await PersistentDevelopmentStore.open(path)
+    expect((await second.readWeekly()).batches[0]).toMatchObject({ status: 'unpaid', periodStart: '2026-09-14' })
+  })
+})
+
+it('backs up legacy desktop data before migration and does not duplicate it on restart', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'spl-legacy-backup-')), path = join(directory, 'data.json')
+  const legacy = { users: [], sessions: [], events: [], expenses: [], payments: [], payroll: [], payrollSettlements: [], workers: [], payrollTemplates: [] }
+  const original = JSON.stringify(legacy)
+  await writeFile(path, original)
+  const store = await PersistentDevelopmentStore.open(path)
+  expect(await readFile(`${path}.before-payroll-v2.bak`, 'utf8')).toBe(original)
+  const app = buildApp(store, async () => ({userId:'owner',role:'owner',unit:null}), undefined, undefined, store, store)
+  await app.ready(); await app.close()
+  const reopened = await PersistentDevelopmentStore.open(path)
+  expect((await reopened.readWeekly()).migrated).toBe(true)
+  expect(await readFile(`${path}.before-payroll-v2.bak`, 'utf8')).toBe(original)
 })

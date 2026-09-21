@@ -68,6 +68,8 @@ export const paymentSchema=z.object({
 }).strict()
 export const settlementSchema=z.object({paymentDate:z.iso.date(),amount:money.refine(value=>Number(value)>0,'El monto debe ser mayor que cero'),idempotencyKey:z.uuid()}).strict()
 export const eventBudgetSchema=z.object({payrollBudget:money}).strict()
+export const agreedPriceSchema=z.object({agreedPrice:money.nullable(),version:z.number().int().positive()}).strict()
+export const paymentCorrectionSchema=z.object({amount:money.refine(value=>Number(value)>0,'El monto debe ser mayor que cero'),transactionDate:z.iso.date(),reason:text(1000),version:z.number().int().positive()}).strict()
 
 export type CreateOwnerEvent = z.infer<typeof ownerEventSchema>
 export type CreateOperationalEvent = z.infer<typeof operationalEventSchema>

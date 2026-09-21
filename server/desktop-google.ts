@@ -25,7 +25,11 @@ export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store:S
     const redirectUri=`${options.redirectBase}/api/auth/google/desktop/callback`
     const url=new URL('https://accounts.google.com/o/oauth2/v2/auth')
     url.search=new URLSearchParams({client_id:options.clientId,redirect_uri:redirectUri,response_type:'code',scope:'openid email profile',state,code_challenge:createHash('sha256').update(verifier).digest('base64url'),code_challenge_method:'S256',prompt:'select_account'}).toString()
-    await options.openExternal(url.toString())
+    try { await options.openExternal(url.toString()) }
+    catch {
+      flows.delete(flowId)
+      return reply.code(503).send({ error: 'No se pudo abrir el navegador. Inténtalo nuevamente.' })
+    }
     return {data:{flowId}}
   })
   app.get('/api/auth/google/desktop/callback',async(request,reply)=>{

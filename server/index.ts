@@ -6,6 +6,7 @@ import { sessionAuthenticator } from './auth.js'
 import { PostgresEventRepository } from './repository.js'
 import { PostgresSessionStore } from './sessions.js'
 import {PostgresPayrollStore} from './payroll.js'
+import {PostgresWeeklyStore} from './postgres-weekly.js'
 
 const databaseUrl = process.env.DATABASE_URL
 if (!databaseUrl) throw new Error('DATABASE_URL is required')
@@ -15,6 +16,7 @@ const sessions=new PostgresSessionStore(pool)
 const googleClientId=process.env.GOOGLE_CLIENT_ID
 const googleClient=googleClientId?new OAuth2Client(googleClientId):null
 const verifyGoogle=googleClient&&googleClientId?async(credential:string)=>{const ticket=await googleClient.verifyIdToken({idToken:credential,audience:googleClientId});const payload=ticket.getPayload();return payload?.email&&payload.name?{email:payload.email,name:payload.name,emailVerified:payload.email_verified===true}:null}:undefined
-const app = buildApp(new PostgresEventRepository(pool), sessionAuthenticator(sessions),sessions,verifyGoogle,new PostgresPayrollStore(pool))
+const payroll = new PostgresPayrollStore(pool)
+const app = buildApp(new PostgresEventRepository(pool), sessionAuthenticator(sessions),sessions,verifyGoogle,payroll,new PostgresWeeklyStore(pool))
 const port = Number(process.env.PORT ?? 3001)
 await app.listen({ host: '127.0.0.1', port })

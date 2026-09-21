@@ -36,7 +36,7 @@ const verifyGoogle = async (credential: string) => {
 async function main() {
   if (!Number.isSafeInteger(parentProcessId) || parentProcessId <= 0) throw new Error('SPL_PARENT_PID must be a positive integer')
   const store = await PersistentDevelopmentStore.open(resolve(dataDirectory, 'spl-data.json'))
-  const app = buildApp(store, sessionAuthenticator(store), store, verifyGoogle, store)
+  const app = buildApp(store, sessionAuthenticator(store), store, verifyGoogle, store, store)
   const port = Number(process.env.PORT ?? 3001)
   const desktopClientId = process.env.GOOGLE_DESKTOP_CLIENT_ID ?? __GOOGLE_DESKTOP_CLIENT_ID__
   registerDesktopGoogleRoutes(app, {
@@ -46,7 +46,11 @@ async function main() {
     openExternal: url => {
       const parsed = new URL(url)
       if (parsed.protocol !== 'https:' || parsed.hostname !== 'accounts.google.com') throw new Error('URL de autenticación inválida')
-      spawn('explorer.exe', [url], { detached: true, stdio: 'ignore', windowsHide: true }).unref()
+      return new Promise<void>((resolve, reject) => {
+        const browser = spawn('explorer.exe', [url], { detached: true, stdio: 'ignore', windowsHide: true })
+        browser.once('error', reject)
+        browser.once('spawn', () => { browser.unref(); resolve() })
+      })
     },
   })
   app.addHook('onSend', async (_request, reply, payload) => {

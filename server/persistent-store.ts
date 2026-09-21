@@ -1,5 +1,6 @@
-import { mkdir, readFile, rename, stat, writeFile, chmod } from 'node:fs/promises'
+import { mkdir, readFile, rename, stat, writeFile, chmod, copyFile, constants } from 'node:fs/promises'
 import { dirname } from 'node:path'
+import { upgradeWeekly, type WeeklyState } from './weekly.js'
 import { DevelopmentStore } from './dev.js'
 
 const MAX_STORE_BYTES = 10 * 1024 * 1024
@@ -14,12 +15,13 @@ type StoredState = {
   payrollSettlements: DevelopmentStore['payrollSettlements']
   workers: DevelopmentStore['workers']
   payrollTemplates: DevelopmentStore['payrollTemplates']
+  weekly?: DevelopmentStore['weekly']
 }
 
 function isStoredState(value: unknown): value is StoredState {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false
   const state = value as Record<string, unknown>
-  return ['users', 'sessions', 'events', 'expenses', 'payments', 'payroll', 'payrollSettlements', 'workers', 'payrollTemplates'].every(key => Array.isArray(state[key]))
+  return ['users', 'sessions', 'events', 'expenses', 'payments', 'payroll', 'payrollSettlements', 'workers', 'payrollTemplates'].every(key => Array.isArray(state[key])) && (state.weekly === undefined || typeof state.weekly === 'object')
 }
 
 export class PersistentDevelopmentStore extends DevelopmentStore {
@@ -47,6 +49,10 @@ export class PersistentDevelopmentStore extends DevelopmentStore {
       this.payrollSettlements = parsed.payrollSettlements
       this.workers = parsed.workers
       this.payrollTemplates = parsed.payrollTemplates
+      if (!parsed.weekly || (parsed.weekly as {schemaVersion?:number}).schemaVersion !== 2) {
+        await copyFile(this.filePath, `${this.filePath}.before-payroll-v2.bak`, constants.COPYFILE_EXCL).catch(error => { if (error.code !== 'EEXIST') throw error })
+      }
+      this.weekly = parsed.weekly ? upgradeWeekly(parsed.weekly) : this.weekly
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     }
@@ -63,20 +69,25 @@ export class PersistentDevelopmentStore extends DevelopmentStore {
       payrollSettlements: this.payrollSettlements,
       workers: this.workers,
       payrollTemplates: this.payrollTemplates,
+      weekly: this.weekly,
     }
   }
 
-  private persist() {
-    const serialized = JSON.stringify(this.snapshot())
-    if (Buffer.byteLength(serialized) > MAX_STORE_BYTES) throw new Error('Los datos locales exceden el límite permitido')
-    this.writeQueue = this.writeQueue.then(async () => {
+  private persist(nextWeekly?: WeeklyState) {
+    const task = this.writeQueue.then(async () => {
+      const snapshot = this.snapshot()
+      if (nextWeekly) snapshot.weekly = nextWeekly
+      const serialized = JSON.stringify(snapshot)
+      if (Buffer.byteLength(serialized) > MAX_STORE_BYTES) throw new Error('Los datos locales exceden el límite permitido')
       await mkdir(dirname(this.filePath), { recursive: true })
       const temporary = `${this.filePath}.tmp`
       await writeFile(temporary, serialized, { encoding: 'utf8', mode: 0o600 })
       await rename(temporary, this.filePath)
       await chmod(this.filePath, 0o600).catch(() => undefined)
+      if (nextWeekly) this.weekly = nextWeekly
     })
-    return this.writeQueue
+    this.writeQueue = task.then(() => undefined, () => undefined)
+    return task
   }
 
   override async findOrCreateGoogleUser(...args: Parameters<DevelopmentStore['findOrCreateGoogleUser']>) { const result = await super.findOrCreateGoogleUser(...args); await this.persist(); return result }
@@ -84,12 +95,17 @@ export class PersistentDevelopmentStore extends DevelopmentStore {
   override async revokeSession(...args: Parameters<DevelopmentStore['revokeSession']>) { await super.revokeSession(...args); await this.persist() }
   override async create(...args: Parameters<DevelopmentStore['create']>) { const result = await super.create(...args); await this.persist(); return result }
   override async updatePayrollBudget(...args: Parameters<DevelopmentStore['updatePayrollBudget']>) { const result = await super.updatePayrollBudget(...args); await this.persist(); return result }
+  override async updateAgreedPrice(...args: Parameters<DevelopmentStore['updateAgreedPrice']>) { const result = await super.updateAgreedPrice(...args); await this.persist(); return result }
   override async addExpense(...args: Parameters<DevelopmentStore['addExpense']>) { const result = await super.addExpense(...args); await this.persist(); return result }
   override async addPayment(...args: Parameters<DevelopmentStore['addPayment']>) { const result = await super.addPayment(...args); await this.persist(); return result }
+  override async correctPayment(...args: Parameters<DevelopmentStore['correctPayment']>) { const result = await super.correctPayment(...args); await this.persist(); return result }
   override async addSettlement(...args: Parameters<DevelopmentStore['addSettlement']>) { const result = await super.addSettlement(...args); await this.persist(); return result }
   override async createPayroll(...args: Parameters<DevelopmentStore['createPayroll']>) { const result = await super.createPayroll(...args); await this.persist(); return result }
   override async settlePayroll(...args: Parameters<DevelopmentStore['settlePayroll']>) { const result = await super.settlePayroll(...args); await this.persist(); return result }
   override async createWorker(...args: Parameters<DevelopmentStore['createWorker']>) { const result = await super.createWorker(...args); await this.persist(); return result }
   override async createTemplate(...args: Parameters<DevelopmentStore['createTemplate']>) { const result = await super.createTemplate(...args); await this.persist(); return result }
   override async updateTemplate(...args: Parameters<DevelopmentStore['updateTemplate']>) { const result = await super.updateTemplate(...args); await this.persist(); return result }
+  protected override async commitWeekly(next: WeeklyState) {
+    await this.persist(next)
+  }
 }
