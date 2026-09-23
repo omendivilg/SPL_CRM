@@ -24,6 +24,7 @@ fn wait_for_backend(port: u16) -> Result<(), String> {
 pub fn run() {
   let application = tauri::Builder::default()
     .plugin(tauri_plugin_shell::init())
+    .plugin(tauri_plugin_opener::init())
     .setup(|app| {
       let data_dir = app.path().app_data_dir()?;
       let resource_dir = app.path().resource_dir()?;

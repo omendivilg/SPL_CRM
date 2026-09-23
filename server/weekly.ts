@@ -7,26 +7,27 @@ import { calculatePayroll, type PayrollRecord, type PayrollSettlement, type Payr
 const amount = z.string().regex(/^(0|[1-9]\d{0,11})(\.\d{1,2})?$/, 'Usa un monto válido con hasta dos decimales.')
 const positive = amount.refine(value => new Decimal(value).gt(0), 'El importe debe ser mayor que cero.')
 const destination = { scope: z.enum(['warehouse', 'event']), eventId: z.uuid().nullable().optional() }
-export const weeklyLineSchema = z.object({
+const weeklyLineSchema = z.object({
   id: z.uuid(), employeeId: z.uuid(), baseCost: amount, additions: amount, deductions: amount,
   allocations: z.array(z.object({ ...destination, amount: positive }).strict()).min(1).max(100),
 }).strict()
-export const generalExpenseSchema = z.object({
+const generalExpenseSchema = z.object({
   id: z.uuid(), concept: z.string().trim().min(1).max(200), amount: positive,
   notes: z.string().trim().max(1000).default(''), ...destination,
 }).strict()
-export const weeklyInputSchema = z.object({
+const weeklyInputSchema = z.object({
   id: z.uuid(), version: z.number().int().min(0), idempotencyKey: z.uuid(),
-  periodStart: z.iso.date(), periodEnd: z.iso.date(), lines: z.array(weeklyLineSchema).min(1).max(100),
+  periodStart: z.iso.date(), periodEnd: z.iso.date(), lines: z.array(weeklyLineSchema).max(100),
   expenses: z.array(generalExpenseSchema).max(100),
-}).strict()
-export const teamInputSchema = z.object({
+}).strict().refine(input => input.lines.length + input.expenses.length > 0, 'Agrega un trabajador o un gasto.')
+const teamInputSchema = z.object({
   id: z.uuid(), version: z.number().int().min(0), idempotencyKey: z.uuid(), name: z.string().trim().min(1).max(120),
   isDefault: z.boolean(), lines: z.array(weeklyLineSchema.omit({ id: true, allocations: true })).min(1).max(100),
   expenses: z.array(generalExpenseSchema.omit({ id: true, scope: true, eventId: true })).max(100),
 }).strict()
-export const paymentInputSchema = z.object({ version: z.number().int().min(1), idempotencyKey: z.uuid(), paymentDate: z.iso.date() }).strict()
-export const reversalInputSchema = z.object({ version: z.number().int().min(1), idempotencyKey: z.uuid(), reason: z.string().trim().min(1).max(1000) }).strict()
+const paymentInputSchema = z.object({ version: z.number().int().min(1), idempotencyKey: z.uuid(), paymentDate: z.iso.date() }).strict()
+const reversalInputSchema = z.object({ version: z.number().int().min(1), idempotencyKey: z.uuid(), reason: z.string().trim().min(1).max(1000) }).strict()
+const deleteInputSchema = z.object({ version: z.number().int().min(1) }).strict()
 export type WeeklyInput = z.infer<typeof weeklyInputSchema>
 export type TeamInput = z.infer<typeof teamInputSchema>
 export type GeneralExpense = z.infer<typeof generalExpenseSchema>
@@ -47,7 +48,7 @@ export interface WeeklyStore {
   transactWeekly<T>(operation: (state: WeeklyState) => T | Promise<T>): Promise<T>
 }
 export const emptyWeekly = (): WeeklyState => ({ schemaVersion: 2, batches: [], templates: [], migrated: false, legacy: [], legacySettlements: [], importedWorkers: [], archive: [] })
-export function conflict(message: string): never { throw Object.assign(new Error(message), { statusCode: 409 }) }
+function conflict(message: string): never { throw Object.assign(new Error(message), { statusCode: 409 }) }
 const audit = (principal: Principal, reason: string, before: unknown, after: unknown): Audit => ({ actor: principal.userId, at: new Date().toISOString(), reason, before: structuredClone(before), after: structuredClone(after) })
 const fingerprint = (raw: unknown) => createHash('sha256').update(JSON.stringify(raw)).digest('hex')
 function repeated(operations: Operation[], key: string, raw: unknown) {
@@ -157,6 +158,15 @@ export function reverseWeekly(state: WeeklyState, batchId: string, raw: unknown,
   batch.history.push(audit(principal, input.reason, before, { status: 'unpaid', payment }))
   batch.operations.push(operation(input.idempotencyKey, request))
   return batch
+}
+export function deleteWeekly(state: WeeklyState, batchId: string, raw: unknown, principal: Principal) {
+  const input = deleteInputSchema.parse(raw), batch = state.batches.find(b => b.id === batchId)
+  if (!batch) conflict('La nómina no existe.')
+  if (batch.version !== input.version) conflict('La nómina cambió. Recarga antes de eliminarla.')
+  if (batch.status === 'paid' || batch.historical) conflict('Revierte el pago antes de eliminar la nómina.')
+  state.archive.push({ kind: 'deleted-weekly-payroll', batch: structuredClone(batch), deletedBy: principal.userId, deletedAt: new Date().toISOString() })
+  state.batches = state.batches.filter(b => b.id !== batchId)
+  return { id: batchId }
 }
 export function saveTeam(state: WeeklyState, raw: unknown, workers: WorkerRecord[]) {
   const input = teamInputSchema.parse(raw), prior = state.templates.find(t => t.id === input.id)

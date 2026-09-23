@@ -1,13 +1,13 @@
 import { Decimal } from 'decimal.js'
 import type { ApiTeamTemplate, WeeklyPayrollInput } from '../api'
 
-export const currency = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' })
+const currency = new Intl.NumberFormat('es-MX', { style: 'currency', currency: 'MXN' })
 export const cash = (value: string | number) => currency.format(Number(value))
 export const decimal = (value: string) => new Decimal(value || 0)
 export function localDate(value = new Date()) {
   return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2,'0')}-${String(value.getDate()).padStart(2,'0')}`
 }
-export function currentWeek() {
+function currentWeek() {
   const start = new Date(); start.setDate(start.getDate() - (start.getDay()+6)%7)
   const end = new Date(start); end.setDate(end.getDate()+6)
   return { periodStart: localDate(start), periodEnd: localDate(end) }
@@ -24,7 +24,7 @@ export function totals(editor: Pick<Editor, 'lines' | 'expenses'>) {
 }
 export function validate(editor: Editor): string | null {
   if (!editor.periodStart || !editor.periodEnd || editor.periodEnd < editor.periodStart) return 'Revisa las fechas de la nómina.'
-  if (!editor.lines.length) return 'Agrega al menos un trabajador.'
+  if (!editor.lines.length && !editor.expenses.length) return 'Agrega un trabajador o un gasto.'
   const money = /^(0|[1-9]\d{0,11})(\.\d{1,2})?$/
   for (const line of editor.lines) {
     if (![line.baseCost,line.additions,line.deductions].every(value=>money.test(value))) return 'Completa los importes de cada trabajador con hasta dos decimales.'

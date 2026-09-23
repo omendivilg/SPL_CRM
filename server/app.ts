@@ -6,7 +6,7 @@ import rateLimit from '@fastify/rate-limit'
 import { ZodError } from 'zod'
 import type { Authenticator } from './auth.js'
 import { registerAuthRoutes, type GoogleVerifier } from './auth.js'
-import { agreedPriceSchema, eventBudgetSchema, expenseSchema, operationalEventSchema, ownerEventSchema, paymentCorrectionSchema, paymentSchema, settlementSchema, toCoordinatorEvent } from './domain.js'
+import { agreedPriceSchema, deleteVersionSchema, eventBudgetSchema, expenseSchema, operationalEventSchema, ownerEventSchema, payRemainingSchema, paymentCorrectionSchema, paymentSchema, settlementSchema, toCoordinatorEvent } from './domain.js'
 import type { EventRepository } from './repository.js'
 import type { SessionStore } from './sessions.js'
 import {workerInputSchema,type PayrollStore} from './payroll.js'
@@ -22,7 +22,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
   app.register(rateLimit,{global:false})
   if(sessions)app.after(()=>registerAuthRoutes(app,sessions,verifyGoogle))
   app.addHook('onRequest', async (request, reply) => {
-    if (!request.url.startsWith('/api/') || request.url === '/api/auth/login' || request.url === '/api/auth/google' || request.url === '/api/auth/test-login' || request.url === '/api/auth/test-login/config' || request.url.startsWith('/api/auth/google/desktop/')) return
+    if (!request.url.startsWith('/api/') || request.url === '/api/auth/login' || request.url === '/api/auth/google' || request.url === '/api/auth/google/native' || request.url === '/api/auth/test-login' || request.url === '/api/auth/test-login/config' || request.url.startsWith('/api/auth/google/desktop/')) return
     const principal = await authenticate(request)
     if (!principal) return reply.code(401).send({ error: 'No autorizado' })
     request.principal = principal
@@ -31,7 +31,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
     if (error instanceof ZodError) return reply.code(400).send({ error: 'Solicitud inválida', issues: error.issues.map(issue => ({ path: issue.path.join('.'), message: issue.message })) })
     const statusCode = typeof error === 'object' && error !== null && 'statusCode' in error && typeof error.statusCode === 'number' ? error.statusCode : undefined
     if (statusCode === 413) return reply.code(413).send({ error: 'Solicitud demasiado grande' })
-    if (statusCode && statusCode < 500) return reply.code(statusCode).send({ error: 'Solicitud inválida' })
+    if (statusCode && statusCode < 500) return reply.code(statusCode).send({ error: statusCode === 409 && error instanceof Error ? error.message : 'Solicitud inválida' })
     return reply.code(500).send({ error: 'Error interno' })
   })
   app.get('/health', async () => ({ status: 'ok' }))
@@ -53,6 +53,7 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
   })
   app.patch<{Params:{id:string}}>('/api/events/:id/budget',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const {payrollBudget}=eventBudgetSchema.parse(request.body);const event=await repository.updatePayrollBudget(request.params.id,payrollBudget,request.principal);if(!event)return reply.code(404).send({error:'Evento no encontrado'});return{data:event}})
   app.patch<{Params:{id:string}}>('/api/events/:id/price',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});if(!repository.updateAgreedPrice)return reply.code(501).send({error:'Actualización no disponible'});const event=await repository.updateAgreedPrice(request.params.id,agreedPriceSchema.parse(request.body),request.principal);if(!event)return reply.code(409).send({error:'El evento cambió o no existe'});return{data:event}})
+  app.delete<{Params:{id:string}}>('/api/events/:id',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});if(!repository.deleteEvent)return reply.code(501).send({error:'Eliminación no disponible'});const {version}=deleteVersionSchema.parse(request.body);if(weekly){const state=await weekly.readWeekly();if(state.batches.some(batch=>batch.lines.some(line=>line.allocations.some(a=>a.eventId===request.params.id))||batch.expenses.some(expense=>expense.eventId===request.params.id)))return reply.code(409).send({error:'Este evento tiene costos de nómina. Quita esas asignaciones antes de eliminarlo.'})}if(payroll&&(await payroll.listPayroll()).some(line=>line.allocations.some(a=>a.eventId===request.params.id)))return reply.code(409).send({error:'Este evento tiene costos de nómina históricos y no se puede eliminar.'});const deleted=await repository.deleteEvent(request.params.id,version,request.principal);if(!deleted)return reply.code(404).send({error:'Evento no encontrado'});return{data:{id:request.params.id}}})
   app.post<{Params:{id:string}}>('/api/events/:id/expenses', async (request, reply) => {
     if (request.principal.role === 'coordinator') return reply.code(403).send({ error: 'Acceso denegado' })
     const input = expenseSchema.parse(request.body)
@@ -67,8 +68,10 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
     return { data: [...expenses, ...(weekly ? expenseProjection(await weekly.readWeekly()).filter(e => e.eventId === request.params.id) : [])] }
   })
   app.post<{Params:{id:string}}>('/api/events/:id/payments',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const payment=await repository.addPayment(request.params.id,paymentSchema.parse(request.body),request.principal);if(!payment)return reply.code(404).send({error:'Evento no encontrado'});return reply.code(201).send({data:payment})})
+  app.post<{Params:{id:string}}>('/api/events/:id/pay-remaining',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});if(!repository.payRemaining)return reply.code(501).send({error:'Pago completo no disponible'});const payment=await repository.payRemaining(request.params.id,payRemainingSchema.parse(request.body),request.principal);if(!payment)return reply.code(404).send({error:'Evento no encontrado'});return reply.code(201).send({data:payment})})
   app.get<{Params:{id:string}}>('/api/events/:id/payments',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const payments=await repository.listPayments(request.params.id,request.principal);if(!payments)return reply.code(404).send({error:'Evento no encontrado'});return {data:payments}})
   app.patch<{Params:{id:string}}>('/api/payments/:id/correct',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});if(!repository.correctPayment)return reply.code(501).send({error:'Corrección no disponible'});const payment=await repository.correctPayment(request.params.id,paymentCorrectionSchema.parse(request.body),request.principal);if(!payment)return reply.code(404).send({error:'Movimiento no encontrado'});return{data:payment}})
+  app.delete<{Params:{id:string}}>('/api/payments/:id',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});if(!repository.deletePayment)return reply.code(501).send({error:'Eliminación no disponible'});const {version}=deleteVersionSchema.parse(request.body);const deleted=await repository.deletePayment(request.params.id,version,request.principal);if(!deleted)return reply.code(404).send({error:'Movimiento no encontrado'});return{data:{id:request.params.id}}})
   app.post<{Params:{id:string}}>('/api/expenses/:id/settlements',async(request,reply)=>{if(request.principal.role==='coordinator')return reply.code(403).send({error:'Acceso denegado'});const settlement=await repository.addSettlement(request.params.id,settlementSchema.parse(request.body),request.principal);if(!settlement)return reply.code(404).send({error:'Gasto no encontrado'});return reply.code(201).send({data:settlement})})
   if (payroll) {
     app.get('/api/payroll', async (request, reply) => {

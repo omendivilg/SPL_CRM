@@ -1,4 +1,4 @@
-export type ApiBusinessUnit = 'SPL' | '5to Elemento'
+type ApiBusinessUnit = 'SPL' | '5to Elemento'
 export type ApiEvent = {
   id: string
   businessUnit: ApiBusinessUnit
@@ -20,10 +20,8 @@ export type ApiSettlement={id:string;expenseId:string;paymentDate:string;amount:
 export type ApiPayroll={id:string;employeeName:string;periodStart:string;periodEnd:string;baseCost:string;additions:string;deductions:string;laborCost:string;netPay:string;allocationTotal:string;paidAmount:string;outstandingAmount:string;allocations:Array<{scope:'event'|'warehouse';eventId?:string|null;amount:string}>}
 export type ApiWorker={id:string;name:string;active:boolean}
 export type ApiWeeklyPayroll = import('../server/weekly').WeeklyBatch
-export type ApiWeeklyPayrollLine = ApiWeeklyPayroll['lines'][number]
 export type ApiTeamTemplate = import('../server/weekly').TeamTemplate
 export type WeeklyPayrollInput = Omit<import('../server/weekly').WeeklyInput, 'id'>
-export type GeneralExpense = import('../server/weekly').GeneralExpense
 export type LegacyPayroll = { entries: import('../server/weekly').LegacyEntry[]; settlements: import('../server/payroll').PayrollSettlement[] }
 export type CreateEventInput = Omit<ApiEvent,'id'|'version'>
 export type CreateExpenseInput = { name:string;category:string;expenseDate:string;amount:string;supplier?:string|null;notes?:string|null;dueDate?:string|null }
@@ -73,6 +71,9 @@ export const eventApi = {
   listPayments:(eventId:string)=>request<ApiPayment[]>(`/api/events/${encodeURIComponent(eventId)}/payments`),
   addPayment:(eventId:string,input:{transactionDate:string;amount:string;kind:'payment'|'refund';idempotencyKey:string})=>request<ApiPayment>(`/api/events/${encodeURIComponent(eventId)}/payments`,{method:'POST',body:JSON.stringify(input)},false),
   correctPayment:(paymentId:string,input:{amount:string;transactionDate:string;reason:string;version:number})=>request<ApiPayment>(`/api/payments/${encodeURIComponent(paymentId)}/correct`,{method:'PATCH',body:JSON.stringify(input)},false),
+  deletePayment:(paymentId:string,version:number)=>request<{id:string}>(`/api/payments/${encodeURIComponent(paymentId)}`,{method:'DELETE',body:JSON.stringify({version})},false),
+  payRemaining:(eventId:string,input:{transactionDate:string;idempotencyKey:string})=>request<ApiPayment>(`/api/events/${encodeURIComponent(eventId)}/pay-remaining`,{method:'POST',body:JSON.stringify(input)},false),
+  deleteEvent:(eventId:string,version:number)=>request<{id:string}>(`/api/events/${encodeURIComponent(eventId)}`,{method:'DELETE',body:JSON.stringify({version})},false),
   settleExpense:(expenseId:string,input:{paymentDate:string;amount:string;idempotencyKey:string})=>request<ApiSettlement>(`/api/expenses/${encodeURIComponent(expenseId)}/settlements`,{method:'POST',body:JSON.stringify(input)},false),
 }
 export const authApi={
@@ -84,7 +85,7 @@ export const authApi={
 export type DesktopGoogleStatus={status:'pending'}|{status:'complete';user:SessionUser}
 export const desktopGoogleApi={
   config:()=>request<{enabled:boolean}>('/api/auth/google/desktop/config',{},false),
-  start:()=>request<{flowId:string}>('/api/auth/google/desktop/start',{method:'POST'},false),
+  start:()=>request<{flowId:string;authorizationUrl:string}>('/api/auth/google/desktop/start',{method:'POST'},false),
   status:(flowId:string)=>request<DesktopGoogleStatus>(`/api/auth/google/desktop/status?flowId=${encodeURIComponent(flowId)}`,{},false),
 }
 export const testLoginApi={
@@ -99,6 +100,7 @@ export const weeklyPayrollApi={
   save:(id:string,input:WeeklyPayrollInput)=>request<ApiWeeklyPayroll>(`/api/weekly-payroll/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)},false),
   pay:(id:string,input:{paymentDate:string;idempotencyKey:string;version:number})=>request<ApiWeeklyPayroll>(`/api/weekly-payroll/${encodeURIComponent(id)}/pay`,{method:'POST',body:JSON.stringify(input)},false),
   reverse:(id:string,input:{reason:string;idempotencyKey:string;version:number})=>request<ApiWeeklyPayroll>(`/api/weekly-payroll/${encodeURIComponent(id)}/reverse`,{method:'POST',body:JSON.stringify(input)},false),
+  delete:(id:string,version:number)=>request<{id:string}>(`/api/weekly-payroll/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({version})},false),
   templates:()=>request<ApiTeamTemplate[]>('/api/team-templates'),
   saveTemplate:(id:string,input:Omit<import('../server/weekly').TeamInput,'id'>)=>request<ApiTeamTemplate>(`/api/team-templates/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)},false),
 }

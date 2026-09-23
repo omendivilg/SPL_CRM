@@ -1,6 +1,9 @@
 {
   "name": "app",
   "private": true,
+  "workspaces": [
+    "mobile"
+  ],
   "version": "0.0.0",
   "type": "module",
   "scripts": {
@@ -13,9 +16,14 @@
     "desktop:dev": "tauri dev",
     "desktop:build": "tauri build",
     "build:server": "tsc -p tsconfig.server.json",
+    "build:server:production": "tsc -p tsconfig.server.build.json",
+    "db:migrate": "tsx scripts/migrate.ts",
+    "db:import-local": "tsx scripts/import-local.ts",
+    "backup:create": "tsx scripts/backup.ts create",
+    "backup:restore": "tsx scripts/backup.ts restore",
     "start:server": "tsx server/index.ts",
     "start:local-server": "tsx server/dev-entry.ts",
-    "test": "vitest run server src",
+    "test": "vitest run server src --exclude build-server/**",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },
@@ -23,8 +31,8 @@
     "@playwright/test": "^1.63.0",
     "@tauri-apps/cli": "^2.11.4",
     "@types/pg": "^8.23.1",
-    "@types/react": "^19.3.0",
-    "@types/react-dom": "^19.3.0",
+    "@types/react": "^19.2.4",
+    "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^6.1.1",
     "concurrently": "^10.0.5",
     "esbuild": "^0.28.2",
@@ -36,11 +44,13 @@
     "wait-on": "^9.1.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.899.0",
     "@fastify/cookie": "^11.1.2",
     "@fastify/cors": "^11.3.0",
     "@fastify/helmet": "^13.1.1",
     "@fastify/rate-limit": "^11.2.0",
     "@fastify/static": "^10.1.3",
+    "@tauri-apps/plugin-opener": "^2.5.5",
     "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
@@ -48,8 +58,8 @@
     "google-auth-library": "^11.0.2",
     "lucide-react": "^1.46.0",
     "pg": "^8.23.0",
-    "react": "^19.3.0",
-    "react-dom": "^19.3.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "zod": "^4.6.5"
   },
   "overrides": {

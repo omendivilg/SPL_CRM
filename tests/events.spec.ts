@@ -5,9 +5,9 @@ const initialEvent = {id:'11111111-1111-4111-8111-111111111111',businessUnit:'SP
 const owner={id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',email:'owner@spl.mx',displayName:'Oscar Méndez',role:'owner'}
 const coordinator={id:'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',email:'coord@spl.mx',displayName:'Coordinación SPL',role:'coordinator'}
 
-async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof owner;requireLogin?:boolean;testLogin?:boolean}={}) {
-  const events=[initialEvent]; let listAttempts=0
-  const payments:any[]=[];const expenses:any[]=[];const payroll:any[]=[];const workers:any[]=[];const templates:any[]=[]
+async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof owner;requireLogin?:boolean;testLogin?:boolean;events?:Array<typeof initialEvent>;payments?:any[]}={}) {
+  const events=options.events??[initialEvent]; let listAttempts=0
+  const payments:any[]=options.payments??[];const expenses:any[]=[];const payroll:any[]=[];const workers:any[]=[];const templates:any[]=[]
   let authenticated=!options.requireLogin
   await page.route('**/api/**',async(route:Route)=>{
     const request=route.request(),url=new URL(request.url()),method=request.method()
@@ -34,11 +34,15 @@ async function mockApi(page:Page, options:{failFirstList?:boolean;user?:typeof o
     if(url.pathname==='/api/events'&&method==='POST'){
       const body=request.postDataJSON(); const created={...body,id:'33333333-3333-4333-8333-333333333333',version:1};events.unshift(created);return route.fulfill({status:201,json:{data:created}})
     }
+    if(/^\/api\/events\/[^/]+\/price$/.test(url.pathname)&&method==='PATCH'){const body=request.postDataJSON();const event=events.find(item=>url.pathname.includes(item.id))!;event.agreedPrice=body.agreedPrice;event.version++;return route.fulfill({status:200,json:{data:event}})}
+    if(/^\/api\/events\/[^/]+$/.test(url.pathname)&&method==='DELETE'){const index=events.findIndex(item=>url.pathname.endsWith(item.id));if(index<0)return route.fulfill({status:404,json:{error:'missing'}});const [removed]=events.splice(index,1);return route.fulfill({status:200,json:{data:{id:removed.id}}})}
     if(/^\/api\/events\/[^/]+\/budget$/.test(url.pathname)&&method==='PATCH'){const body=request.postDataJSON();initialEvent.payrollBudget=body.payrollBudget;return route.fulfill({status:200,json:{data:initialEvent}})}
     if(url.pathname.endsWith('/expenses')&&method==='GET')return route.fulfill({status:200,json:{data:expenses}})
     if(url.pathname.endsWith('/expenses')&&method==='POST'){const body=request.postDataJSON();const created={...body,id:'44444444-4444-4444-8444-444444444444',eventId:initialEvent.id,paidAmount:'0.00',version:1};expenses.push(created);return route.fulfill({status:201,json:{data:created}})}
-    if(url.pathname.endsWith('/payments')&&method==='GET')return route.fulfill({status:200,json:{data:payments}})
-    if(url.pathname.endsWith('/payments')&&method==='POST'){const body=request.postDataJSON();const prior=payments.find(item=>item.idempotencyKey===body.idempotencyKey);const created=prior??{...body,id:'55555555-5555-4555-8555-555555555555',eventId:initialEvent.id,createdAt:new Date().toISOString()};if(!prior)payments.push(created);return route.fulfill({status:201,json:{data:created}})}
+    if(url.pathname.endsWith('/payments')&&method==='GET')return route.fulfill({status:200,json:{data:payments.filter(item=>url.pathname.includes(item.eventId))}})
+    if(url.pathname.endsWith('/payments')&&method==='POST'){const body=request.postDataJSON();const prior=payments.find(item=>item.idempotencyKey===body.idempotencyKey);const created=prior??{...body,id:`55555555-5555-4555-8555-${String(payments.length+1).padStart(12,'0')}`,eventId:events.find(item=>url.pathname.includes(item.id))?.id,createdAt:new Date().toISOString()};if(!prior)payments.push(created);return route.fulfill({status:201,json:{data:created}})}
+    if(url.pathname.endsWith('/pay-remaining')&&method==='POST'){const body=request.postDataJSON(),event=events.find(item=>url.pathname.includes(item.id))!,paid=payments.filter(item=>item.eventId===event.id).reduce((sum,item)=>sum+(item.kind==='refund'?-Number(item.amount):Number(item.amount)),0),created={...body,id:'77777777-7777-4777-8777-777777777777',eventId:event.id,amount:(Number(event.agreedPrice)-paid).toFixed(2),kind:'payment',version:1,createdAt:new Date().toISOString()};payments.push(created);return route.fulfill({status:201,json:{data:created}})}
+    if(/^\/api\/payments\/[^/]+$/.test(url.pathname)&&method==='DELETE'){const index=payments.findIndex(item=>url.pathname.endsWith(item.id));if(index<0)return route.fulfill({status:404,json:{error:'missing'}});const [removed]=payments.splice(index,1);return route.fulfill({status:200,json:{data:{id:removed.id}}})}
     if(url.pathname.includes('/api/expenses/')&&url.pathname.endsWith('/settlements')&&method==='POST'){const body=request.postDataJSON(),expense=expenses.find(item=>url.pathname.includes(item.id));if(!expense)return route.fulfill({status:404,json:{error:'missing'}});expense.paidAmount=(Number(expense.paidAmount)+Number(body.amount)).toFixed(2);return route.fulfill({status:201,json:{data:{...body,id:'66666666-6666-4666-8666-666666666666',expenseId:expense.id,paidAmount:expense.paidAmount,createdAt:new Date().toISOString()}}})}
     return route.fulfill({status:404,json:{error:'not found'}})
   })
@@ -137,6 +141,80 @@ test('records a customer payment and shows the reconciled balance',async({page})
   await page.screenshot({path:'../outputs/spl-payment-workflow.png',fullPage:true})
 })
 
+test('dashboard orders future events and shows only unpaid event balances',async({page})=>{
+  const past={...initialEvent,id:'11111111-1111-4111-8111-111111111112',venue:'Pasado',clientName:'Cliente pasado',eventDate:'2000-01-01',agreedPrice:'500.00',operationalStatus:'Pendiente'}
+  const paid={...initialEvent,id:'11111111-1111-4111-8111-111111111113',venue:'Pagado próximo',clientName:'Cliente pagado',eventDate:'2098-01-01',agreedPrice:'900.00',operationalStatus:'Pendiente'}
+  const sooner={...initialEvent,id:'11111111-1111-4111-8111-111111111114',venue:'Próximo primero',clientName:'Cliente primero',eventDate:'2099-03-01',agreedPrice:'1000.00',operationalStatus:'Pendiente'}
+  const later={...initialEvent,id:'11111111-1111-4111-8111-111111111115',venue:'Próximo después',clientName:'Cliente después',eventDate:'2099-06-01',agreedPrice:'2000.00',operationalStatus:'Pendiente'}
+  await mockApi(page,{events:[later,past,sooner,paid],payments:[{id:'55555555-5555-4555-8555-555555555558',eventId:paid.id,transactionDate:'2097-12-01',amount:'900.00',kind:'payment',version:1}]})
+  await page.goto('/')
+  await expect(page.getByRole('heading',{name:'Flujo de efectivo'})).toHaveCount(0)
+  const upcoming=page.locator('.events-panel .event-row')
+  await expect(upcoming).toHaveCount(3)
+  await expect(upcoming.nth(0)).toContainText('Pagado próximo')
+  await expect(upcoming.nth(1)).toContainText('Próximo primero')
+  await expect(upcoming.nth(2)).toContainText('Próximo después')
+  await expect(upcoming.nth(0).locator('.status')).toHaveText('Pagado')
+  await expect(upcoming.nth(0).locator('.status')).toHaveClass(/confirmed/)
+  const debts=page.locator('.budget-panel .alert-item')
+  await expect(debts).toHaveCount(3)
+  await expect(debts.nth(0)).toContainText('Cliente pasado')
+  await expect(debts.nth(0)).toContainText('$500.00')
+  await expect(debts.nth(1)).toContainText('$1,000.00')
+  await expect(debts.nth(2)).toContainText('$2,000.00')
+  await expect(page.locator('.budget-panel')).not.toContainText('Cliente pagado')
+  await page.screenshot({path:'../outputs/spl-dashboard-receivables.png',fullPage:true})
+  await page.setViewportSize({width:390,height:844})
+  await expect.poll(async()=>{const box=await page.locator('.sidebar').boundingBox();return Boolean(box&&box.x+box.width<=0)}).toBe(true)
+  await expect(upcoming.nth(0).locator('.status')).toBeVisible()
+  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=document.documentElement.clientWidth)).toBe(true)
+  await page.screenshot({path:'../outputs/spl-dashboard-receivables-mobile.png',fullPage:true})
+})
+
+test('pays the remaining event balance, removes abonos and can remove the price and event',async({page})=>{
+  await mockApi(page,{events:[{...initialEvent,operationalStatus:'Pendiente'}]})
+  await page.goto('/')
+  await page.getByRole('button',{name:'Eventos'}).click()
+  await expect(page.locator('.event-detail .status')).toHaveText('Pendiente')
+  await page.getByRole('button',{name:'Registrar abono'}).click()
+  await page.getByRole('dialog',{name:'Registrar abono'}).getByLabel('Monto MXN').fill('25000')
+  await page.getByRole('button',{name:'Guardar abono'}).click()
+  await expect(page.locator('.event-detail .status')).toHaveText('Pendiente')
+  await page.getByRole('button',{name:'Pago completo'}).click()
+  await page.getByRole('dialog',{name:'Registrar pago del saldo'}).getByRole('button',{name:'Confirmar pago completo'}).click()
+  await expect(page.locator('.event-detail .detail-money').getByText('$0.00')).toBeVisible()
+  await expect(page.locator('.event-detail .status')).toHaveText('Pagado')
+  await expect(page.locator('.event-table-row .status')).toHaveText('Pagado')
+  await page.getByRole('button',{name:'Panel general'}).click()
+  await expect(page.locator('.budget-panel .alert-item')).toHaveCount(0)
+  await page.getByRole('button',{name:'Eventos'}).click()
+  await page.getByRole('button',{name:/Quitar abono del/}).first().click()
+  await page.getByRole('button',{name:'Confirmar',exact:true}).click()
+  await expect(page.getByText('+$25,000.00')).toHaveCount(0)
+  await expect(page.locator('.event-detail .status')).toHaveText('Pendiente')
+  await page.getByRole('button',{name:'Editar precio acordado'}).click()
+  await page.getByRole('dialog',{name:'Editar precio acordado'}).getByRole('button',{name:'Quitar precio acordado'}).click()
+  await expect(page.locator('.event-detail').getByText('Precio pendiente')).toBeVisible()
+  await page.getByRole('button',{name:'Eliminar evento'}).click()
+  await page.getByRole('button',{name:'Sí, eliminar evento'}).click()
+  await expect(page.getByText('Aún no hay eventos')).toBeVisible()
+})
+
+test('shows Pagado when separate abonos cover the agreed event price',async({page})=>{
+  await mockApi(page,{events:[{...initialEvent,agreedPrice:'100.00',operationalStatus:'Pendiente'}]})
+  await page.goto('/')
+  await page.getByRole('button',{name:'Eventos'}).click()
+  for(const amount of ['40','60']){
+    await page.getByRole('button',{name:'Registrar abono'}).click()
+    await page.getByRole('dialog',{name:'Registrar abono'}).getByLabel('Monto MXN').fill(amount)
+    await page.getByRole('button',{name:'Guardar abono'}).click()
+  }
+  await expect(page.locator('.event-detail .status')).toHaveText('Pagado')
+  await expect(page.locator('.event-detail .status')).toHaveClass(/confirmed/)
+  await page.getByRole('button',{name:'Panel general'}).click()
+  await expect(page.locator('.budget-panel .alert-item')).toHaveCount(0)
+})
+
 test('creates a named expense and marks only its full balance as paid',async({page})=>{
   await mockApi(page)
   await page.goto('/')
@@ -148,7 +226,7 @@ test('creates a named expense and marks only its full balance as paid',async({pa
   await dialog.getByRole('button',{name:'Guardar'}).click()
   await expect(page.getByText('Transporte adicional')).toBeVisible()
   await page.getByRole('button',{name:'Marcar como pagado'}).click()
-  await expect(page.getByText('Pagado')).toBeVisible()
+  await expect(page.getByText('Pagado',{exact:true})).toBeVisible()
 })
 
 test('updates an event payroll budget after the event was created',async({page})=>{await mockApi(page);await page.goto('/');await page.getByRole('button',{name:'Eventos'}).click();await page.getByRole('button',{name:'Modificar presupuesto'}).click();const dialog=page.getByRole('dialog',{name:'Modificar presupuesto de nómina'});await dialog.getByLabel('Presupuesto MXN').fill('45000');await dialog.getByRole('button',{name:'Guardar'}).click();await expect(page.getByText('Presupuesto $45,000.00')).toBeVisible()})

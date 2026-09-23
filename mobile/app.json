@@ -1,0 +1,29 @@
+{
+  "expo": {
+    "name": "SPL Control Financiero",
+    "slug": "spl-control-financiero",
+    "version": "1.0.0",
+    "orientation": "default",
+    "icon": "./assets/icon.png",
+    "scheme": "spl",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "mx.spl.controlfinanciero",
+      "config": { "usesNonExemptEncryption": false }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "plugins": ["expo-router", "expo-secure-store"],
+    "web": {
+      "favicon": "./assets/favicon.png"
+    }
+  }
+}

@@ -53,13 +53,13 @@ cargo test --manifest-path src-tauri/Cargo.toml
 
 La aplicación de escritorio usa un cliente OAuth de tipo Desktop app.
 El acceso abre Google en el navegador del sistema y regresa a un callback local protegido con PKCE y estado aleatorio.
-Define `GOOGLE_DESKTOP_CLIENT_ID` antes de compilar para reemplazar el cliente configurado en la compilación.
-Las compilaciones locales y de escritorio habilitan un botón de modo de pruebas que crea una sesión administrativa sin Google.
-El servidor central de producción mantiene esta ruta deshabilitada.
+Descarga el JSON del cliente OAuth de tipo Desktop app desde Google Cloud y define `GOOGLE_DESKTOP_CREDENTIALS_FILE` con su ruta en `.env` antes de compilar.
+El empaquetado verifica que el archivo incluya el ID y el secreto del mismo cliente; no agregues ese JSON al repositorio.
+El modo de pruebas está disponible en desarrollo y permanece deshabilitado en los instaladores y en el servidor central de producción.
 La versión 0.2.0 agrega presupuestos de nómina editables por evento, nóminas con varios trabajadores, liquidación total de gastos extra y modales propios para las operaciones financieras.
 
 ```powershell
-$env:GOOGLE_DESKTOP_CLIENT_ID = "cliente.apps.googleusercontent.com"
+$env:GOOGLE_DESKTOP_CREDENTIALS_FILE = "C:/ruta/al/cliente-oauth-desktop.json"
 npm run desktop:build
 ```
 
@@ -82,3 +82,12 @@ No reemplaces los datos nuevos por el respaldo después de registrar operaciones
 Las pruebas de nómina de Playwright usan el servidor real en el puerto 4318 y un archivo temporal aislado; no usan los datos de la aplicación instalada.
 Las pruebas del adaptador PostgreSQL usan pg-mem para verificar su contrato SQL y el mismo dominio de nómina.
 El bloqueo de transacciones simultáneas en un PostgreSQL desplegado requiere también validación en ese entorno.
+
+## Fly, Neon y iOS
+
+La API central dispone de una imagen de producción y una configuración inicial de Fly con 512 MB, suspensión automática y cero máquinas mínimas encendidas.
+Neon conserva PostgreSQL y Tigris recibe respaldos diarios cifrados mediante un trabajo separado.
+Consulta [DEPLOYMENT.md](./DEPLOYMENT.md) para migraciones, importación del archivo de Windows, restauración y TestFlight.
+
+La aplicación Expo se encuentra en `mobile` y requiere una compilación de desarrollo o TestFlight para Google Sign-In.
+Expo Go no incluye ese módulo nativo.

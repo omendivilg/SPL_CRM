@@ -51,7 +51,7 @@ export async function createMonthlyReport(data:MonthlyReportData){
   const expenseById=new Map(data.expenses.map(expense=>[expense.id,expense]))
   const payrollById=new Map(data.payroll.map(entry=>[entry.id,entry]))
   const monthlyPayments=data.payments.filter(item=>item.transactionDate.startsWith(month))
-  const monthlyExpenseSettlements=data.expenseSettlements.filter(item=>item.paymentDate.startsWith(month))
+  const monthlyExpenseSettlements=data.expenseSettlements.filter(item=>item.paymentDate.startsWith(month)&&expenseById.has(item.expenseId))
   const monthlyPayrollSettlements=data.payrollSettlements.filter(item=>item.paymentDate.startsWith(month))
 
   const summary=workbook.addWorksheet('Resumen',{views:[{showGridLines:false}]})

@@ -96,15 +96,14 @@ export class PersistentDevelopmentStore extends DevelopmentStore {
   override async create(...args: Parameters<DevelopmentStore['create']>) { const result = await super.create(...args); await this.persist(); return result }
   override async updatePayrollBudget(...args: Parameters<DevelopmentStore['updatePayrollBudget']>) { const result = await super.updatePayrollBudget(...args); await this.persist(); return result }
   override async updateAgreedPrice(...args: Parameters<DevelopmentStore['updateAgreedPrice']>) { const result = await super.updateAgreedPrice(...args); await this.persist(); return result }
+  override async deleteEvent(...args: Parameters<DevelopmentStore['deleteEvent']>) { const result = await super.deleteEvent(...args); await this.persist(); return result }
   override async addExpense(...args: Parameters<DevelopmentStore['addExpense']>) { const result = await super.addExpense(...args); await this.persist(); return result }
   override async addPayment(...args: Parameters<DevelopmentStore['addPayment']>) { const result = await super.addPayment(...args); await this.persist(); return result }
   override async correctPayment(...args: Parameters<DevelopmentStore['correctPayment']>) { const result = await super.correctPayment(...args); await this.persist(); return result }
+  override async deletePayment(...args: Parameters<DevelopmentStore['deletePayment']>) { const result = await super.deletePayment(...args); await this.persist(); return result }
+  override async payRemaining(...args: Parameters<DevelopmentStore['payRemaining']>) { const result = await super.payRemaining(...args); await this.persist(); return result }
   override async addSettlement(...args: Parameters<DevelopmentStore['addSettlement']>) { const result = await super.addSettlement(...args); await this.persist(); return result }
-  override async createPayroll(...args: Parameters<DevelopmentStore['createPayroll']>) { const result = await super.createPayroll(...args); await this.persist(); return result }
-  override async settlePayroll(...args: Parameters<DevelopmentStore['settlePayroll']>) { const result = await super.settlePayroll(...args); await this.persist(); return result }
   override async createWorker(...args: Parameters<DevelopmentStore['createWorker']>) { const result = await super.createWorker(...args); await this.persist(); return result }
-  override async createTemplate(...args: Parameters<DevelopmentStore['createTemplate']>) { const result = await super.createTemplate(...args); await this.persist(); return result }
-  override async updateTemplate(...args: Parameters<DevelopmentStore['updateTemplate']>) { const result = await super.updateTemplate(...args); await this.persist(); return result }
   protected override async commitWeekly(next: WeeklyState) {
     await this.persist(next)
   }

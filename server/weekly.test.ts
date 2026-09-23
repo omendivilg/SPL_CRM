@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest'
 import { DevelopmentStore } from './dev.js'
 import { PersistentDevelopmentStore } from './persistent-store.js'
 import { buildApp } from './app.js'
-import { emptyWeekly, migrateWeekly, payWeekly, reverseWeekly, saveTeam, saveWeekly, upgradeWeekly } from './weekly.js'
+import { deleteWeekly, emptyWeekly, migrateWeekly, payWeekly, reverseWeekly, saveTeam, saveWeekly, upgradeWeekly } from './weekly.js'
 import ExcelJS from 'exceljs'
 
 const principal = { userId: 'owner', role: 'owner' as const, unit: null }
@@ -19,6 +19,16 @@ const makeInput = () => ({ id: randomUUID(), version: 0, idempotencyKey: randomU
 const directory=[worker,secondWorker]
 
 describe('whole weekly payroll', () => {
+  it('allows an expense-only payroll and archives it when deleted', async () => {
+    const store=new DevelopmentStore(),input={...makeInput(),lines:[]}
+    const saved=await store.transactWeekly(state=>saveWeekly(state,input,directory,new Set(),principal))
+    expect(saved).toMatchObject({wagesTotal:'0.00',expensesTotal:'300.20',total:'300.20',status:'unpaid'})
+    await expect(store.transactWeekly(state=>saveWeekly(state,{...input,lines:[],expenses:[]},directory,new Set(),principal))).rejects.toThrow()
+    await store.transactWeekly(state=>deleteWeekly(state,saved.id,{version:saved.version},principal))
+    const state=await store.readWeekly()
+    expect(state.batches).toHaveLength(0)
+    expect(state.archive).toContainEqual(expect.objectContaining({kind:'deleted-weekly-payroll'}))
+  })
   it('saves all workers and optional expenses atomically, pays once and reverses with history', async () => {
     const store = new DevelopmentStore(), input=makeInput()
     const batch=await store.transactWeekly(state=>saveWeekly(state,input,directory,new Set(),principal))

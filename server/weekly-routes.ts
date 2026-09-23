@@ -2,7 +2,7 @@ import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import type { PayrollStore } from './payroll.js'
 import type { EventRepository } from './repository.js'
-import { migrateWeekly, payWeekly, reverseWeekly, saveTeam, saveWeekly, type WeeklyStore } from './weekly.js'
+import { deleteWeekly, migrateWeekly, payWeekly, reverseWeekly, saveTeam, saveWeekly, type WeeklyStore } from './weekly.js'
 
 export function registerWeeklyRoutes(app: FastifyInstance, payroll: PayrollStore, weekly: WeeklyStore, repository: EventRepository) {
   app.addHook('onReady', async () => {
@@ -23,6 +23,11 @@ export function registerWeeklyRoutes(app: FastifyInstance, payroll: PayrollStore
     if (request.principal.role === 'coordinator') return reply.code(403).send({ error: 'Acceso denegado' })
     z.uuid().parse(request.params.id)
     return { data: await weekly.transactWeekly(async state => saveWeekly(state, { ...(request.body as object), id: request.params.id }, await payroll.listWorkers(), new Set((await repository.list(request.principal)).map(e => e.id)), request.principal)) }
+  })
+  app.delete<{ Params: { id: string } }>('/api/weekly-payroll/:id', async (request, reply) => {
+    if (request.principal.role === 'coordinator') return reply.code(403).send({ error: 'Acceso denegado' })
+    z.uuid().parse(request.params.id)
+    return { data: await weekly.transactWeekly(state => deleteWeekly(state, request.params.id, request.body, request.principal)) }
   })
   for (const action of ['pay', 'reverse'] as const) app.post<{ Params: { id: string } }>(`/api/weekly-payroll/:id/${action}`, async (request, reply) => {
     if (request.principal.role === 'coordinator') return reply.code(403).send({ error: 'Acceso denegado' })

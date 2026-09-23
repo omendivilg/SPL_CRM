@@ -1,0 +1,15 @@
+node_modules
+dist
+build-server
+desktop-backend-dist
+src-tauri/target
+src-tauri/binaries
+test-results
+outputs
+.git
+.env*
+mobile/node_modules
+mobile/dist-ios
+mobile/.expo
+mobile/ios
+mobile/android

@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "local-auth-opener",
+  "description": "Allow the local SPL interface to open Google authorization in the system browser",
+  "windows": ["main"],
+  "remote": {
+    "urls": ["http://127.0.0.1:*/*"]
+  },
+  "platforms": ["windows"],
+  "permissions": [
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://accounts.google.com/**" }]
+    }
+  ]
+}
