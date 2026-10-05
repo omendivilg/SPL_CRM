@@ -22,7 +22,8 @@ const parentProcessId = Number(process.env.SPL_PARENT_PID)
 
 const clientId = process.env.GOOGLE_CLIENT_ID ?? '920421552012-ice9btjftpdd86juf31gfho3qjnc6gfm.apps.googleusercontent.com'
 process.env.ADMIN_EMAIL ??= 'omendivilg@gmail.com'
-process.env.GOOGLE_ALLOWED_EMAILS ??= process.env.ADMIN_EMAIL
+process.env.ADMIN_EMAILS ??= 'oscarmendivil3@gmail.com'
+process.env.GOOGLE_ALLOWED_EMAILS ??= `${process.env.ADMIN_EMAIL},${process.env.ADMIN_EMAILS}`
 process.env.SPL_DESKTOP = '1'
 process.env.SPL_ALLOW_TEST_LOGIN ??= process.env.NODE_ENV==='production'?'0':'1'
 

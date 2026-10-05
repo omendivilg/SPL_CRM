@@ -14,7 +14,9 @@ export type ApiEvent = {
   extraExpenseBudget?: string
   version: number
 }
-export type ApiExpense = { id:string;eventId:string;name:string;category:string;expenseDate:string;amount:string;paidAmount:string;supplier?:string|null;notes?:string|null;dueDate?:string|null;version:number;source?:'payroll';payrollId?:string }
+export type ApiExpense = { id:string;eventId:string;name:string;category:string;expenseDate:string;amount:string;paidAmount:string;supplier?:string|null;notes?:string|null;dueDate?:string|null;version:number;source?:'payroll';payrollId?:string;businessUnit?:'SPL'|'5to Elemento' }
+export type ApiQuickExpense = { id:string;name:string;category:string;expenseDate:string;amount:string;businessUnit:'SPL'|'5to Elemento';notes:string;paymentMethod:'cash'|'card'|null;createdAt:string;createdBy:string }
+export type ApiDirectIncome = { id:string;name:string;amount:string;expectedDate:string;receivedDate:string|null;notes?:string|null;businessUnit:ApiBusinessUnit;version:number;createdBy:string;createdAt:string;receivedBy?:string;receivedAt?:string;deletedAt?:string;deletedBy?:string }
 export type ApiPayment={id:string;eventId:string;transactionDate:string;amount:string;kind:'payment'|'refund';idempotencyKey:string;createdAt:string;version?:number}
 export type ApiSettlement={id:string;expenseId:string;paymentDate:string;amount:string;idempotencyKey:string;createdAt:string;paidAmount:string}
 export type ApiPayroll={id:string;employeeName:string;periodStart:string;periodEnd:string;baseCost:string;additions:string;deductions:string;laborCost:string;netPay:string;allocationTotal:string;paidAmount:string;outstandingAmount:string;allocations:Array<{scope:'event'|'warehouse';eventId?:string|null;amount:string}>}
@@ -62,9 +64,9 @@ async function request<T>(path:string, options:RequestInit={}, retryGet=true):Pr
 async function requestVoid(path:string,options:RequestInit){await fetch(`${baseUrl}${path}`,{...options,credentials:'include',headers:{accept:'application/json',...options.headers}})}
 async function requestFile(path:string){const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),15000);try{const response=await fetch(`${baseUrl}${path}`,{credentials:'include',signal:controller.signal,headers:{...(devToken?{authorization:`Bearer ${devToken}`}:{})}});if(!response.ok)throw new ApiError(response.status===401?'unauthorized':response.status===403?'forbidden':response.status<500?'invalid':'server',response.status);return response.blob()}catch(error){if(error instanceof ApiError)throw error;if(error instanceof DOMException&&error.name==='AbortError')throw new ApiError('timeout');throw new ApiError('network')}finally{clearTimeout(timeout)}}
 export const eventApi = {
+  listExpenseSettlements:()=>request<ApiSettlement[]>('/api/expense-settlements'),
   list:()=>request<ApiEvent[]>('/api/events'),
   create:(input:CreateEventInput)=>request<ApiEvent>('/api/events',{method:'POST',body:JSON.stringify(input)},false),
-  updatePayrollBudget:(eventId:string,payrollBudget:string)=>request<ApiEvent>(`/api/events/${encodeURIComponent(eventId)}/budget`,{method:'PATCH',body:JSON.stringify({payrollBudget})},false),
   updateAgreedPrice:(eventId:string,input:{agreedPrice:string|null;version:number})=>request<ApiEvent>(`/api/events/${encodeURIComponent(eventId)}/price`,{method:'PATCH',body:JSON.stringify(input)},false),
   listExpenses:(eventId:string)=>request<ApiExpense[]>(`/api/events/${encodeURIComponent(eventId)}/expenses`),
   addExpense:(eventId:string,input:CreateExpenseInput)=>request<ApiExpense>(`/api/events/${encodeURIComponent(eventId)}/expenses`,{method:'POST',body:JSON.stringify(input)},false),
@@ -87,6 +89,16 @@ export const desktopGoogleApi={
   config:()=>request<{enabled:boolean}>('/api/auth/google/desktop/config',{},false),
   start:()=>request<{flowId:string;authorizationUrl:string}>('/api/auth/google/desktop/start',{method:'POST'},false),
   status:(flowId:string)=>request<DesktopGoogleStatus>(`/api/auth/google/desktop/status?flowId=${encodeURIComponent(flowId)}`,{},false),
+}
+export const quickExpenseApi = {
+  list:()=>request<ApiQuickExpense[]>('/api/quick-expenses'),
+  save:(id:string,input:Pick<ApiQuickExpense,'name'|'category'|'amount'|'expenseDate'|'businessUnit'|'notes'|'paymentMethod'>)=>request<ApiQuickExpense>(`/api/quick-expenses/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)},false),
+}
+export const directIncomeApi = {
+  list:()=>request<ApiDirectIncome[]>('/api/direct-income'),
+  save:(id:string,input:Pick<ApiDirectIncome,'name'|'amount'|'businessUnit'|'expectedDate'|'receivedDate'|'notes'>)=>request<ApiDirectIncome>(`/api/direct-income/${encodeURIComponent(id)}`,{method:'PUT',body:JSON.stringify(input)},false),
+  receive:(id:string,receivedDate:string,version:number)=>request<ApiDirectIncome>(`/api/direct-income/${encodeURIComponent(id)}/receive`,{method:'PATCH',body:JSON.stringify({receivedDate,version})},false),
+  delete:(id:string,version:number)=>request<ApiDirectIncome>(`/api/direct-income/${encodeURIComponent(id)}`,{method:'DELETE',body:JSON.stringify({version})},false),
 }
 export const testLoginApi={
   config:()=>request<{enabled:boolean}>('/api/auth/test-login/config',{},false),

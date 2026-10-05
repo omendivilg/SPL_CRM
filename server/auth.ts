@@ -4,6 +4,7 @@ import type { Principal } from './domain.js'
 import { hashPassword, verifyPassword } from './password.js'
 import { hashSessionToken, newSessionToken, type SessionStore } from './sessions.js'
 import type { Role } from './domain.js'
+import { googleAccess } from './google-access.js'
 
 export type Authenticator = (request: FastifyRequest) => Promise<Principal | null>
 export const SESSION_COOKIE='spl_session'
@@ -52,10 +53,8 @@ export function registerAuthRoutes(app:FastifyInstance,store:SessionStore,verify
     const identity=await verifyGoogle(credential)
     if(!identity?.emailVerified)return reply.code(401).send({error:'No se pudo verificar la cuenta de Google'})
     const email=identity.email.trim().toLowerCase()
-    const allowed=new Set((process.env.GOOGLE_ALLOWED_EMAILS??'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean))
-    if(!allowed.has(email))return reply.code(403).send({error:'Esta cuenta no está autorizada'})
-    const adminEmail=(process.env.ADMIN_EMAIL??'').trim().toLowerCase()
-    const role:Role=email===adminEmail?'admin':'coordinator'
+    const {allowed,role}=googleAccess(email)
+    if(!allowed)return reply.code(403).send({error:'Esta cuenta no está autorizada'})
     const user=await store.findOrCreateGoogleUser(email,identity.name.slice(0,160),role,role==='coordinator'?'5to Elemento':null)
     if(!user.active)return reply.code(403).send({error:'Esta cuenta no está autorizada'})
     return {data:await issueSession(reply,store,user)}
@@ -64,9 +63,8 @@ export function registerAuthRoutes(app:FastifyInstance,store:SessionStore,verify
     if(!verifyGoogle)return reply.code(503).send({error:'Google no está configurado'})
     const {credential}=googleSchema.parse(request.body),identity=await verifyGoogle(credential)
     if(!identity?.emailVerified)return reply.code(401).send({error:'Identidad no verificada'})
-    const email=identity.email.toLowerCase(),allowed=new Set((process.env.GOOGLE_ALLOWED_EMAILS??'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean))
-    if(!allowed.has(email))return reply.code(403).send({error:'Cuenta no autorizada'})
-    const adminEmail=(process.env.ADMIN_EMAIL??'').trim().toLowerCase(),role=email===adminEmail?'admin' as const:'coordinator' as const
+    const email=identity.email.toLowerCase(),{allowed,role}=googleAccess(email)
+    if(!allowed)return reply.code(403).send({error:'Cuenta no autorizada'})
     const user=await store.findOrCreateGoogleUser(email,identity.name,role,role==='coordinator'?'5to Elemento':null)
     if(!user.active)return reply.code(403).send({error:'Cuenta desactivada'})
     const token=newSessionToken(),expiresAt=new Date(Date.now()+SESSION_MS)

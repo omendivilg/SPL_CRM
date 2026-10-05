@@ -6,7 +6,8 @@ import type {LoginUser,SessionStore} from './sessions.js'
 
 const originalAllowed=process.env.GOOGLE_ALLOWED_EMAILS
 const originalAdmin=process.env.ADMIN_EMAIL
-afterEach(()=>{process.env.GOOGLE_ALLOWED_EMAILS=originalAllowed;process.env.ADMIN_EMAIL=originalAdmin})
+const originalAdmins=process.env.ADMIN_EMAILS
+afterEach(()=>{process.env.GOOGLE_ALLOWED_EMAILS=originalAllowed;process.env.ADMIN_EMAIL=originalAdmin;if(originalAdmins===undefined)delete process.env.ADMIN_EMAILS;else process.env.ADMIN_EMAILS=originalAdmins})
 
 function store(active=true){
   const user:LoginUser={id:'u1',email:'omendivilg@gmail.com',displayName:'Oscar',role:'admin',businessUnit:null,passwordHash:null,active}
@@ -24,6 +25,15 @@ async function appFor(options:{clientId?:string;clientSecret?:string;active?:boo
 }
 
 describe('desktop Google OAuth',()=>{
+  it('accepts the additional demo account with administrator access',async()=>{
+    process.env.GOOGLE_ALLOWED_EMAILS='omendivilg@gmail.com,oscarmendivil3@gmail.com';process.env.ADMIN_EMAIL='omendivilg@gmail.com';process.env.ADMIN_EMAILS='oscarmendivil3@gmail.com'
+    const {app,sessionStore}=await appFor({clientId:'desktop.apps.googleusercontent.com',identityEmail:'oscarmendivil3@gmail.com'})
+    const started=await app.inject({method:'POST',url:'/api/auth/google/desktop/start'})
+    const state=new URL(started.json().data.authorizationUrl).searchParams.get('state')
+    expect((await app.inject({url:`/api/auth/google/desktop/callback?code=${'c'.repeat(20)}&state=${state}`})).statusCode).toBe(200)
+    expect(sessionStore.findOrCreateGoogleUser).toHaveBeenCalledWith('oscarmendivil3@gmail.com','Oscar','admin',null)
+    await app.close()
+  })
   it('uses the system authorization flow with state and PKCE, then creates a session',async()=>{
     process.env.GOOGLE_ALLOWED_EMAILS='omendivilg@gmail.com';process.env.ADMIN_EMAIL='omendivilg@gmail.com'
     const {app,sessionStore,fetcher}=await appFor({clientId:'desktop.apps.googleusercontent.com'})

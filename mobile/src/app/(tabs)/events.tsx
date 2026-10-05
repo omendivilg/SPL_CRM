@@ -1,5 +1,5 @@
 import { useCallback, useState } from 'react'
-import { Pressable, StyleSheet, Text } from 'react-native'
+import { Pressable, StyleSheet, Text, View } from 'react-native'
 import { router, useFocusEffect } from 'expo-router'
 import { Card, Money, Screen, ui } from '../../components'
 import { listEvents, listPayments, type EventRecord } from '../../api'
@@ -11,14 +11,15 @@ export default function Events() {
   const [paidIds, setPaidIds] = useState<Set<string>>(new Set())
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const {user}=useSession()
+  const {user,businessScope}=useSession()
   const role=user?.role
 
   useFocusEffect(useCallback(() => {
     let active = true
+    setLoading(true)
     void (async()=>{
       try {
-        const events=await listEvents()
+        const events=(await listEvents()).filter(event=>businessScope==='Todos'||event.businessUnit===businessScope)
         const paid=new Set<string>()
         if(role!=='coordinator'){
           const movements=await Promise.all(events.map(event=>listPayments(event.id)))
@@ -28,12 +29,13 @@ export default function Events() {
           })
         }
         if(active){setItems(events);setPaidIds(paid);setError('');setLoading(false)}
-      } catch(reason){if(active){setError(reason instanceof Error?reason.message:'No se pudieron cargar los eventos.');setLoading(false)}}
+      } catch(reason){if(active){setItems([]);setPaidIds(new Set());setError(reason instanceof Error?reason.message:'No se pudieron cargar los eventos.');setLoading(false)}}
     })()
     return () => { active = false }
-  }, [role]))
+  }, [role,businessScope]))
 
-  return <Screen title="Eventos" loading={loading} action={<Pressable style={ui.button} onPress={() => router.push('/event/new')}><Text style={ui.buttonText}>Nuevo</Text></Pressable>}>
+  return <Screen title="Eventos" loading={loading} action={<View style={{flexDirection:'row',gap:6}}>{role!=='coordinator'&&<Pressable style={ui.secondaryButton} onPress={() => router.push('/income/new')}><Text style={ui.buttonText}>Utilidad</Text></Pressable>}<Pressable style={ui.button} onPress={() => router.push('/event/new')}><Text style={ui.buttonText}>Evento</Text></Pressable></View>}>
+    {role!=='coordinator'&&<Pressable style={ui.secondaryButton} onPress={() => router.push('/expense/new')}><Text style={ui.buttonText}>+ Gasto nuevo</Text></Pressable>}
     {error && <Text style={styles.error}>{error}</Text>}
     {!items.length && !error ? <Text style={ui.empty}>No hay eventos.</Text> : items.map(event => <Card key={event.id} onPress={() => router.push({ pathname: '/event/[id]', params: { id: event.id } })}>
       <Text style={ui.text}>{event.clientName}</Text>

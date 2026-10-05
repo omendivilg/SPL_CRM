@@ -50,27 +50,30 @@ export async function createMonthlyReport(data:MonthlyReportData){
   const eventById=new Map(data.events.map(event=>[event.id,event]))
   const expenseById=new Map(data.expenses.map(expense=>[expense.id,expense]))
   const payrollById=new Map(data.payroll.map(entry=>[entry.id,entry]))
+  const payrollUnitByLineId=new Map(data.weekly?.batches.flatMap(batch=>batch.lines.map(line=>[line.id,batch.businessUnit] as const))??[])
   const monthlyPayments=data.payments.filter(item=>item.transactionDate.startsWith(month))
   const monthlyExpenseSettlements=data.expenseSettlements.filter(item=>item.paymentDate.startsWith(month)&&expenseById.has(item.expenseId))
   const monthlyPayrollSettlements=data.payrollSettlements.filter(item=>item.paymentDate.startsWith(month))
+  const quickExpenses=data.weekly?.quickExpenses.filter(item=>item.expenseDate.startsWith(month))??[]
+  const directIncomes=data.weekly?.directIncomes.filter(item=>!item.deletedAt)??[]
+  const expectedIncomes=directIncomes.filter(item=>item.expectedDate.startsWith(month))
+  const receivedIncomes=directIncomes.filter(item=>item.receivedDate?.startsWith(month))
 
   const summary=workbook.addWorksheet('Resumen',{views:[{showGridLines:false}]})
   configure(summary,'Resumen mensual',period,[{header:'Concepto',key:'concept',width:34},{header:'SPL',key:'spl',width:18},{header:'5to Elemento',key:'fifth',width:18},{header:'Consolidado',key:'total',width:18}])
   const units=['SPL','5to Elemento'] as const
   const metrics=[
     ['Precio acordado',(unit:string)=>selectedEvents.filter(e=>e.businessUnit===unit).reduce((sum,e)=>sum.plus(e.agreedPrice??0),new Decimal(0))],
-    ['Cobros netos del mes',(unit:string)=>monthlyPayments.filter(p=>eventById.get(p.eventId)?.businessUnit===unit).reduce((sum,p)=>sum.plus(p.kind==='refund'?new Decimal(p.amount).negated():p.amount),new Decimal(0))],
+    ['Cobros netos del mes',(unit:string)=>monthlyPayments.filter(p=>eventById.get(p.eventId)?.businessUnit===unit).reduce((sum,p)=>sum.plus(p.kind==='refund'?new Decimal(p.amount).negated():p.amount),receivedIncomes.filter(i=>i.businessUnit===unit).reduce((sum,i)=>sum.plus(i.amount),new Decimal(0)))],
     ['Gastos de eventos',(unit:string)=>selectedExpenses.filter(e=>eventById.get(e.eventId)?.businessUnit===unit).reduce((sum,e)=>sum.plus(e.amount),new Decimal(0))],
     ['Costo laboral asignado',(unit:string)=>selectedPayroll.flatMap(p=>p.allocations).filter(a=>a.eventId&&eventById.get(a.eventId)?.businessUnit===unit).reduce((sum,a)=>sum.plus(a.amount),new Decimal(0))],
-    ['Costo compartido de almacén',(_unit:string)=>selectedPayroll.flatMap(p=>p.allocations).filter(a=>a.scope==='warehouse').reduce((sum,a)=>sum.plus(a.amount),new Decimal(0)).div(2)],
+    ['Costo laboral de almacén',(unit:string)=>selectedPayroll.filter(p=>(payrollUnitByLineId.get(p.id)??'SPL')===unit).flatMap(p=>p.allocations).filter(a=>a.scope==='warehouse').reduce((sum,a)=>sum.plus(a.amount),new Decimal(0))],
   ] as const
-  metrics.forEach(([label,calc])=>{const left=calc(units[0]),right=calc(units[1]);summary.addRow({concept:label,spl:left.toNumber(),fifth:right.toNumber(),total:left.plus(right).toNumber()})})
-  summary.addRow({concept:'Contribución directa',spl:{formula:'B5-B7-B8'},fifth:{formula:'C5-C7-C8'},total:{formula:'D5-D7-D8'}})
-  summary.addRow({concept:'Presupuesto de nómina',spl:selectedEvents.filter(e=>e.businessUnit==='SPL').reduce((s,e)=>s.plus(e.payrollBudget),new Decimal(0)).toNumber(),fifth:selectedEvents.filter(e=>e.businessUnit==='5to Elemento').reduce((s,e)=>s.plus(e.payrollBudget),new Decimal(0)).toNumber(),total:{formula:'B11+C11'}})
-  summary.addRow({concept:'Presupuesto de gastos extra',spl:selectedEvents.filter(e=>e.businessUnit==='SPL').reduce((s,e)=>s.plus(e.extraExpenseBudget),new Decimal(0)).toNumber(),fifth:selectedEvents.filter(e=>e.businessUnit==='5to Elemento').reduce((s,e)=>s.plus(e.extraExpenseBudget),new Decimal(0)).toNumber(),total:{formula:'B12+C12'}})
+  const metricRows=new Map<string,number>()
+  metrics.forEach(([label,calc])=>{const left=calc(units[0]),right=calc(units[1]);metricRows.set(label,summary.addRow({concept:label,spl:left.toNumber(),fifth:right.toNumber(),total:left.plus(right).toNumber()}).number)})
+  const contributionRow=summary.addRow({concept:'Contribución directa'})
   summary.getColumn(2).numFmt=currency;summary.getColumn(3).numFmt=currency;summary.getColumn(4).numFmt=currency
-  for(let column=1;column<=4;column++)summary.getRow(10).getCell(column).font={name:'Aptos',size:10,bold:true,color:{argb:orange}}
-  finish(summary)
+  for(let column=1;column<=4;column++)contributionRow.getCell(column).font={name:'Aptos',size:10,bold:true,color:{argb:orange}}
 
   const events=workbook.addWorksheet('Eventos',{views:[{showGridLines:false}]})
   configure(events,'Eventos',period,[{header:'ID del evento',key:'id',width:38},{header:'Unidad',key:'unit',width:16},{header:'Cliente',key:'client',width:24},{header:'Lugar',key:'venue',width:26},{header:'Fecha',key:'date',width:13},{header:'Precio',key:'price',width:16},{header:'Cobros',key:'receipts',width:16},{header:'Saldo pendiente',key:'balance',width:17},{header:'Nómina',key:'payroll',width:16},{header:'Gastos extra',key:'expenses',width:16},{header:'Contribución directa',key:'contribution',width:18}])
@@ -78,8 +81,9 @@ export async function createMonthlyReport(data:MonthlyReportData){
   events.getColumn(5).numFmt='yyyy-mm-dd';for(let column=6;column<=11;column++)events.getColumn(column).numFmt=currency;finish(events)
 
   const expenses=workbook.addWorksheet('Detalle de gastos',{views:[{showGridLines:false}]})
-  configure(expenses,'Detalle de gastos',`${period} | Incluye cada gasto de los eventos seleccionados aunque su fecha contable sea distinta.`,[{header:'ID del gasto',key:'id',width:38},{header:'Evento',key:'event',width:38},{header:'Unidad',key:'unit',width:16},{header:'Nombre',key:'name',width:26},{header:'Categoría',key:'category',width:18},{header:'Alcance',key:'scope',width:16},{header:'Fecha',key:'date',width:13},{header:'Monto',key:'amount',width:16},{header:'Pagado',key:'paid',width:16},{header:'Pendiente',key:'outstanding',width:16},{header:'Explicación',key:'explanation',width:34}])
+  configure(expenses,'Detalle de gastos',`${period} | Incluye cada gasto de los eventos seleccionados aunque su fecha contable sea distinta.`,[{header:'ID del gasto',key:'id',width:38},{header:'Evento',key:'event',width:38},{header:'Unidad',key:'unit',width:16},{header:'Nombre',key:'name',width:26},{header:'Categoría',key:'category',width:18},{header:'Alcance',key:'scope',width:16},{header:'Fecha',key:'date',width:13},{header:'Monto',key:'amount',width:16},{header:'Pagado',key:'paid',width:16},{header:'Pendiente',key:'outstanding',width:16},{header:'Explicación',key:'explanation',width:34},{header:'Forma de pago',key:'method',width:18}])
   selectedExpenses.forEach(expense=>expenses.addRow({id:expense.id,event:expense.eventId,unit:eventById.get(expense.eventId)?.businessUnit??'',name:safeText(expense.name),category:safeText(expense.category),scope:'Evento',date:new Date(`${expense.expenseDate}T00:00:00Z`),amount:money(expense.amount),paid:money(expense.paidAmount),outstanding:new Decimal(expense.amount).minus(expense.paidAmount).toNumber(),explanation:safeText(expense.notes)}))
+  quickExpenses.forEach(expense=>expenses.addRow({id:expense.id,event:'',unit:expense.businessUnit,name:safeText(expense.name),category:safeText(expense.category),scope:'Gasto directo',date:new Date(`${expense.expenseDate}T00:00:00Z`),amount:money(expense.amount),paid:money(expense.amount),outstanding:0,explanation:safeText(expense.notes),method:expense.paymentMethod==='cash'?'Efectivo':expense.paymentMethod==='card'?'Tarjeta':'Sin especificar'}))
   expenses.getColumn(7).numFmt='yyyy-mm-dd';for(let column=8;column<=10;column++)expenses.getColumn(column).numFmt=currency;finish(expenses)
 
   const payroll=workbook.addWorksheet('Nómina',{views:[{showGridLines:false}]})
@@ -91,29 +95,51 @@ export async function createMonthlyReport(data:MonthlyReportData){
   configure(movements,'Movimientos',period,[{header:'Fecha',key:'date',width:13},{header:'Tipo',key:'type',width:22},{header:'Entrada',key:'in',width:16},{header:'Salida',key:'out',width:16},{header:'Unidad',key:'unit',width:16},{header:'ID relacionado',key:'related',width:38},{header:'Descripción',key:'description',width:34}])
   monthlyPayments.forEach(item=>movements.addRow({date:new Date(`${item.transactionDate}T00:00:00Z`),type:item.kind==='payment'?'Cobro de cliente':'Reembolso a cliente',in:item.kind==='payment'?money(item.amount):null,out:item.kind==='refund'?money(item.amount):null,unit:eventById.get(item.eventId)?.businessUnit??'',related:item.eventId,description:safeText(eventById.get(item.eventId)?.clientName)}))
   monthlyExpenseSettlements.forEach(item=>{const expense=expenseById.get(item.expenseId),event=expense&&eventById.get(expense.eventId);movements.addRow({date:new Date(`${item.paymentDate}T00:00:00Z`),type:'Pago de gasto',in:null,out:money(item.amount),unit:event?.businessUnit??'',related:item.expenseId,description:safeText(expense?.name)})})
-  monthlyPayrollSettlements.forEach(item=>movements.addRow({date:new Date(`${item.paymentDate}T00:00:00Z`),type:'Pago de nómina',in:null,out:money(item.amount),unit:'Compartido',related:item.payrollEntryId,description:safeText(payrollById.get(item.payrollEntryId)?.employeeName)}))
+  monthlyPayrollSettlements.forEach(item=>movements.addRow({date:new Date(`${item.paymentDate}T00:00:00Z`),type:'Pago de nómina',in:null,out:money(item.amount),unit:payrollUnitByLineId.get(item.payrollEntryId)??'SPL',related:item.payrollEntryId,description:safeText(payrollById.get(item.payrollEntryId)?.employeeName)}))
+  quickExpenses.forEach(expense=>movements.addRow({date:new Date(`${expense.expenseDate}T00:00:00Z`),type:'Gasto directo',in:null,out:money(expense.amount),unit:expense.businessUnit,related:expense.id,description:safeText(expense.name)}))
+  receivedIncomes.forEach(income=>movements.addRow({date:new Date(`${income.receivedDate}T00:00:00Z`),type:'Cobro de utilidad',in:money(income.amount),out:null,unit:income.businessUnit,related:income.id,description:safeText(income.name)}))
   movements.getColumn(1).numFmt='yyyy-mm-dd';movements.getColumn(3).numFmt=currency;movements.getColumn(4).numFmt=currency;finish(movements)
 
   if (data.weekly) {
+    const directFor=(unit:string)=>quickExpenses.reduce((sum,expense)=>sum.plus(expense.businessUnit===unit?expense.amount:0),new Decimal(0))
+    const directSpl=directFor('SPL'),directFifth=directFor('5to Elemento')
+    metricRows.set('Gastos directos pagados',summary.addRow({concept:'Gastos directos pagados',spl:directSpl.toNumber(),fifth:directFifth.toNumber(),total:directSpl.plus(directFifth).toNumber()}).number)
     const selected = data.weekly.batches.filter(b => b.periodEnd.startsWith(month))
     const batches = workbook.addWorksheet('Nóminas semanales')
-    configure(batches,'Nóminas semanales',period,[{header:'ID',key:'id',width:38},{header:'Inicio',key:'start',width:14},{header:'Fin',key:'end',width:14},{header:'Estado',key:'status',width:16},{header:'Trabajadores',key:'workers',width:15},{header:'Sueldos netos',key:'wages',width:18},{header:'Otros gastos',key:'extras',width:18},{header:'Total',key:'total',width:18},{header:'Fecha de pago',key:'paid',width:16}])
-    for (const batch of selected) batches.addRow({id:batch.id,start:batch.periodStart,end:batch.periodEnd,status:batch.status==='paid'?'Pagada':'No pagada',workers:batch.lines.length,wages:money(batch.wagesTotal),extras:money(batch.expensesTotal),total:money(batch.total),paid:batch.payments.findLast(p=>!p.reversedAt)?.paymentDate??''})
-    for (const column of [6,7,8]) batches.getColumn(column).numFmt=currency
+    configure(batches,'Nóminas semanales',period,[{header:'ID',key:'id',width:38},{header:'Unidad',key:'unit',width:17},{header:'Inicio',key:'start',width:14},{header:'Fin',key:'end',width:14},{header:'Estado',key:'status',width:16},{header:'Trabajadores',key:'workers',width:15},{header:'Sueldos netos',key:'wages',width:18},{header:'Otros gastos',key:'extras',width:18},{header:'Total',key:'total',width:18},{header:'Fecha de pago',key:'paid',width:16}])
+    for (const batch of selected) batches.addRow({id:batch.id,unit:batch.businessUnit,start:batch.periodStart,end:batch.periodEnd,status:batch.status==='paid'?'Pagada':'No pagada',workers:batch.lines.length,wages:money(batch.wagesTotal),extras:money(batch.expensesTotal),total:money(batch.total),paid:batch.payments.findLast(p=>!p.reversedAt)?.paymentDate??''})
+    for (const column of [7,8,9]) batches.getColumn(column).numFmt=currency
     finish(batches)
     const extraSheet = workbook.addWorksheet('Gastos de nómina')
-    configure(extraSheet,'Gastos de nómina',period,[{header:'Nómina',key:'batch',width:38},{header:'Concepto',key:'name',width:28},{header:'Destino',key:'destination',width:28},{header:'Importe',key:'amount',width:18},{header:'Notas',key:'notes',width:40}])
-    for (const batch of selected) for (const extra of batch.expenses) extraSheet.addRow({batch:batch.id,name:safeText(extra.concept),destination:extra.scope==='warehouse'?'Almacén':safeText(eventById.get(extra.eventId??'')?.clientName),amount:money(extra.amount),notes:safeText(extra.notes)})
-    extraSheet.getColumn(4).numFmt=currency;finish(extraSheet)
+    configure(extraSheet,'Gastos de nómina',period,[{header:'Nómina',key:'batch',width:38},{header:'Unidad',key:'unit',width:17},{header:'Concepto',key:'name',width:28},{header:'Categoría',key:'category',width:20},{header:'Destino',key:'destination',width:28},{header:'Importe',key:'amount',width:18},{header:'Notas',key:'notes',width:40}])
+    for (const batch of selected) for (const extra of batch.expenses) extraSheet.addRow({batch:batch.id,unit:batch.businessUnit,name:safeText(extra.concept),category:safeText(extra.category),destination:extra.scope==='warehouse'?'Almacén':safeText(eventById.get(extra.eventId??'')?.clientName),amount:money(extra.amount),notes:safeText(extra.notes)})
+    extraSheet.getColumn(6).numFmt=currency;finish(extraSheet)
     const warehouseExtras = expenseProjection(data.weekly).filter(e=>e.scope==='warehouse'&&e.expenseDate.startsWith(month))
     const warehouseTotal = warehouseExtras.reduce((sum,e)=>sum.plus(e.amount),new Decimal(0))
-    summary.addRow({concept:'Otros gastos de nómina - almacén',spl:warehouseTotal.div(2).toNumber(),fifth:warehouseTotal.div(2).toNumber(),total:warehouseTotal.toNumber()})
+    const warehouseFor=(unit:string)=>warehouseExtras.filter(e=>e.businessUnit===unit).reduce((sum,e)=>sum.plus(e.amount),new Decimal(0))
+    metricRows.set('Otros gastos de nómina - almacén',summary.addRow({concept:'Otros gastos de nómina - almacén',spl:warehouseFor('SPL').toNumber(),fifth:warehouseFor('5to Elemento').toNumber(),total:warehouseTotal.toNumber()}).number)
+    const incomeFor=(unit:string)=>expectedIncomes.filter(i=>i.businessUnit===unit).reduce((sum,i)=>sum.plus(i.amount),new Decimal(0))
+    const incomeSpl=incomeFor('SPL'),incomeFifth=incomeFor('5to Elemento')
+    metricRows.set('Utilidades directas previstas',summary.addRow({concept:'Utilidades directas previstas',spl:incomeSpl.toNumber(),fifth:incomeFifth.toNumber(),total:incomeSpl.plus(incomeFifth).toNumber()}).number)
+    const incomeSheet=workbook.addWorksheet('Utilidades')
+    configure(incomeSheet,'Utilidades',`${period} | Previstas por fecha prevista; cobros por fecha real.`,[{header:'ID',key:'id',width:38},{header:'Unidad',key:'unit',width:18},{header:'Nombre',key:'name',width:30},{header:'Monto',key:'amount',width:18},{header:'Fecha prevista',key:'expected',width:17},{header:'Fecha de cobro',key:'received',width:17},{header:'Estado',key:'status',width:16},{header:'Notas',key:'notes',width:40}])
+    directIncomes.filter(i=>i.expectedDate.startsWith(month)||i.receivedDate?.startsWith(month)).forEach(income=>incomeSheet.addRow({id:income.id,unit:income.businessUnit,name:safeText(income.name),amount:money(income.amount),expected:income.expectedDate,received:income.receivedDate??'',status:income.receivedDate?'Cobrada':'Pendiente',notes:safeText(income.notes)}))
+    incomeSheet.getColumn(4).numFmt=currency;finish(incomeSheet)
     for (const batch of data.weekly.batches) for (const payment of batch.payments) {
-      if(payment.paymentDate.startsWith(month)) movements.addRow({date:new Date(`${payment.paymentDate}T00:00:00Z`),type:'Pago completo de nómina',in:null,out:money(payment.amount),unit:'Compartido',related:batch.id,description:`Semana ${batch.periodStart} al ${batch.periodEnd}`})
-      if(payment.reversedAt?.startsWith(month)) movements.addRow({date:new Date(payment.reversedAt),type:'Reversión de registro',in:money(payment.amount),out:null,unit:'Compartido',related:batch.id,description:safeText(payment.reversalReason)})
+      if(payment.paymentDate.startsWith(month)) movements.addRow({date:new Date(`${payment.paymentDate}T00:00:00Z`),type:'Pago completo de nómina',in:null,out:money(payment.amount),unit:batch.businessUnit,related:batch.id,description:`Semana ${batch.periodStart} al ${batch.periodEnd}`})
+      if(payment.reversedAt?.startsWith(month)) movements.addRow({date:new Date(payment.reversedAt),type:'Reversión de registro',in:money(payment.amount),out:null,unit:batch.businessUnit,related:batch.id,description:safeText(payment.reversalReason)})
     }
     finish(movements)
   }
+  const revenues=['Precio acordado','Utilidades directas previstas'].map(label=>metricRows.get(label)).filter((row):row is number=>row!==undefined)
+  const costs=['Gastos de eventos','Costo laboral asignado','Costo laboral de almacén','Gastos directos pagados','Otros gastos de nómina - almacén'].map(label=>metricRows.get(label)).filter((row):row is number=>row!==undefined)
+  for (const column of ['B','C','D']) {
+    const value=(row:number)=>new Decimal(Number(summary.getCell(`${column}${row}`).value))
+    const result=revenues.reduce((sum,row)=>sum.plus(value(row)),new Decimal(0)).minus(costs.reduce((sum,row)=>sum.plus(value(row)),new Decimal(0))).toNumber()
+    contributionRow.getCell(column).value={formula:[...revenues.map(row=>`${column}${row}`),...costs.map(row=>`-${column}${row}`)].join('+').replaceAll('+-','-'),result}
+  }
+  finish(summary)
+  for(let column=1;column<=4;column++)contributionRow.getCell(column).font={name:'Aptos',size:10,bold:true,color:{argb:orange}}
   const buffer=await workbook.xlsx.writeBuffer()
   return Buffer.from(buffer)
 }

@@ -5,15 +5,17 @@ import { addExpense, addPayment, deleteEvent, deletePayment, listEvents, listExp
 import { Card, Field, Money, Screen, ui } from '../../components'
 import { colors } from '../../theme'
 import { useSession } from '../../session'
+import { DEFAULT_EXPENSE_CATEGORY, EXPENSE_CATEGORIES } from '../../../../src/expense-categories'
 
 export default function EventDetail() {
   const { id } = useLocalSearchParams<{ id: string }>()
-  const { user } = useSession()
+  const { user, businessScope } = useSession()
   const [event, setEvent] = useState<EventRecord>()
   const [payments, setPayments] = useState<Payment[]>([])
   const [expenses, setExpenses] = useState<Expense[]>([])
   const [amount, setAmount] = useState('')
   const [concept, setConcept] = useState('')
+  const [expenseCategory, setExpenseCategory] = useState<string>(DEFAULT_EXPENSE_CATEGORY)
   const [price, setPrice] = useState('')
   const [error, setError] = useState('')
   const [confirmEvent, setConfirmEvent] = useState(false)
@@ -41,6 +43,7 @@ export default function EventDetail() {
   }, [load])
 
   if (!event) return <Screen title="Evento" loading={!error}>{error && <Text style={ui.error}>{error}</Text>}</Screen>
+  if (businessScope!=='Todos'&&event.businessUnit!==businessScope)return <Screen title="Evento"><Text style={ui.empty}>Este evento está fuera de la vista de negocio seleccionada.</Text><Pressable style={ui.secondaryButton} onPress={()=>router.replace('/(tabs)/events')}><Text style={ui.buttonText}>Volver a eventos</Text></Pressable></Screen>
 
   const movement = async (kind: 'payment' | 'refund') => {
     try {
@@ -71,8 +74,10 @@ export default function EventDetail() {
       {payments.map(payment => <Card key={payment.id}><View style={ui.row}><Text style={ui.text}>{payment.kind === 'payment' ? 'Cobro' : 'Reembolso'}</Text><Money value={payment.amount} color={payment.kind === 'payment' ? colors.green : colors.danger} /></View><Text style={ui.label}>{payment.transactionDate}</Text>{confirmPayment===payment.id?<View style={ui.row}><Pressable onPress={()=>setConfirmPayment(null)}><Text style={ui.label}>Cancelar</Text></Pressable><Pressable onPress={async()=>{try{await deletePayment(payment);setConfirmPayment(null);await load()}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo quitar el movimiento.')}}}><Text style={ui.error}>Confirmar quitar</Text></Pressable></View>:<Pressable onPress={()=>setConfirmPayment(payment.id)}><Text style={ui.label}>Quitar movimiento</Text></Pressable>}</Card>)}
       <Text style={ui.section}>Gastos</Text>
       <Field label="Concepto" value={concept} onChangeText={setConcept} />
+      <Text style={ui.label}>Categoría de gasto</Text>
+      {EXPENSE_CATEGORIES.map(category=><Pressable key={category} accessibilityRole="radio" accessibilityState={{selected:expenseCategory===category}} onPress={()=>setExpenseCategory(category)}><Text style={[ui.label,expenseCategory===category&&{color:colors.orange}]}>{expenseCategory===category?'●':'○'} {category}</Text></Pressable>)}
       <Field label="Importe del gasto" value={amount} onChangeText={setAmount} keyboardType="decimal-pad" />
-      <Pressable style={ui.button} onPress={async () => { try { await addExpense(event.id, { name: concept, amount: Number(amount).toFixed(2), expenseDate: new Date().toISOString().slice(0, 10) }); setConcept(''); setAmount(''); await load() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') } }}><Text style={ui.buttonText}>Agregar gasto</Text></Pressable>
+      <Pressable style={ui.button} onPress={async () => { try { await addExpense(event.id, { name: concept, category:expenseCategory, amount: Number(amount).toFixed(2), expenseDate: new Date().toISOString().slice(0, 10) }); setConcept(''); setAmount(''); await load() } catch (reason) { setError(reason instanceof Error ? reason.message : 'No se pudo guardar.') } }}><Text style={ui.buttonText}>Agregar gasto</Text></Pressable>
       {expenses.map(expense => <Card key={expense.id}><View style={ui.row}><Text style={ui.text}>{expense.name}</Text><Money value={expense.amount} /></View><Text style={ui.label}>{expense.source === 'payroll' ? 'Originado en nómina' : expense.category}</Text></Card>)}
       <Text style={ui.section}>Eliminar evento</Text>
       {confirmEvent?<Card><Text style={ui.text}>¿Eliminar este evento? Desaparecerá de la agenda y los reportes.</Text><View style={ui.row}><Pressable onPress={()=>setConfirmEvent(false)}><Text style={ui.label}>Cancelar</Text></Pressable><Pressable onPress={async()=>{try{await deleteEvent(event);router.replace('/(tabs)/events')}catch(reason){setError(reason instanceof Error?reason.message:'No se pudo eliminar.')}}}><Text style={ui.error}>Sí, eliminar</Text></Pressable></View></Card>:<Pressable style={ui.secondaryButton} onPress={()=>setConfirmEvent(true)}><Text style={ui.buttonText}>Eliminar evento</Text></Pressable>}

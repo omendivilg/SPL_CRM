@@ -37,6 +37,16 @@ describe('event corrections',()=>{
     expect((await app.inject({method:'GET',url:'/api/events',headers})).json().data).toHaveLength(0)
     await app.close()
   })
+  it('deletes a fully paid event while retaining its payment in the local audit data', async () => {
+    const store = new DevelopmentStore(), app = buildApp(store, async () => principal)
+    const event = await store.create({ businessUnit: 'SPL', clientName: 'Cliente', venue: 'Salón', eventDate: '2026-09-20', operationalStatus: 'Pendiente', agreedPrice: '100.00', payrollBudget: '0.00', extraExpenseBudget: '0.00' }, principal)
+    const payment = await store.addPayment(event.id, { transactionDate: '2026-09-20', amount: '100.00', kind: 'payment', idempotencyKey: randomUUID() }, principal)
+    expect(payment?.amount).toBe('100.00')
+    expect((await app.inject({ method: 'DELETE', url: `/api/events/${event.id}`, headers, payload: { version: event.version } })).statusCode).toBe(200)
+    expect((await app.inject({ method: 'GET', url: '/api/events', headers })).json().data).toHaveLength(0)
+    expect(store.payments.get(event.id)).toHaveLength(1)
+    await app.close()
+  })
   it('keeps payment removal and event deletion after a local restart',async()=>{
     const directory=await mkdtemp(join(tmpdir(),'spl-event-actions-')),path=join(directory,'data.json')
     try {

@@ -10,7 +10,7 @@ Nunca guardes secretos reales en archivos versionados.
 Configura los secretos de la API:
 
 ```powershell
-fly secrets set DATABASE_URL="..." GOOGLE_CLIENT_ID="..." GOOGLE_IOS_CLIENT_ID="..." GOOGLE_ALLOWED_EMAILS="..." ADMIN_EMAIL="..."
+fly secrets set DATABASE_URL="..." GOOGLE_CLIENT_ID="..." GOOGLE_IOS_CLIENT_ID="..." GOOGLE_ALLOWED_EMAILS="..." ADMIN_EMAIL="..." ADMIN_EMAILS="..."
 ```
 
 Aplica las migraciones desde una máquina de confianza antes de desplegar una versión que las necesite:

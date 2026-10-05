@@ -62,8 +62,6 @@ export class PostgresEventRepository implements EventRepository {
       const old=(await client.query<EventRow>(`SELECT ${eventColumns} FROM events WHERE id=$1 AND deleted_at IS NULL FOR UPDATE`,[id])).rows[0]
       if(!old){await client.query('ROLLBACK');return false}
       if(old.version!==version)throw new FinancialConflictError('El evento cambió. Recarga antes de eliminarlo.')
-      const linked=await client.query('SELECT 1 FROM payroll_allocations WHERE event_id=$1 LIMIT 1',[id])
-      if(linked.rows.length)throw new FinancialConflictError('El evento tiene costos de nómina históricos. No se puede eliminar.')
       await client.query('UPDATE events SET deleted_at=now(),version=version+1,updated_at=now() WHERE id=$1',[id])
       await client.query('INSERT INTO audit_log(actor_user_id,entity_type,entity_id,action,old_values) VALUES($1,$2,$3,$4,$5)',[principal.userId,'event',id,'delete',JSON.stringify(mapEvent(old))])
       await client.query('COMMIT');return true

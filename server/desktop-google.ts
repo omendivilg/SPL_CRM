@@ -2,6 +2,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import { issueSession } from './auth.js'
+import { googleAccess } from './google-access.js'
 import type { SessionStore, LoginUser } from './sessions.js'
 
 const callbackSchema=z.union([
@@ -45,9 +46,8 @@ export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store:S
       if(!identityResponse.ok)throw new Error('identity rejected')
       const identity=identitySchema.parse(await identityResponse.json()),email=identity.email.toLowerCase()
       failure='Esta cuenta no está autorizada o no tiene el correo verificado.'
-      const allowed=new Set((process.env.GOOGLE_ALLOWED_EMAILS??'').split(',').map(value=>value.trim().toLowerCase()).filter(Boolean))
-      if(!identity.email_verified||!allowed.has(email))throw new Error('identity not allowed')
-      const adminEmail=(process.env.ADMIN_EMAIL??'').trim().toLowerCase(),role=email===adminEmail?'admin' as const:'coordinator' as const
+      const {allowed,role}=googleAccess(email)
+      if(!identity.email_verified||!allowed)throw new Error('identity not allowed')
       failure='No se pudo guardar el usuario en SPL.'
       const user=await options.store.findOrCreateGoogleUser(email,identity.name,role,role==='coordinator'?'5to Elemento':null)
       if(!user.active){failure='Esta cuenta está desactivada en SPL.';throw new Error('identity inactive')}

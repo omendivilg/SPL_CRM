@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { Decimal } from 'decimal.js'
 import { z } from 'zod'
-import type { Principal } from './domain.js'
+import type { BusinessUnit, Principal } from './domain.js'
+import { DEFAULT_EXPENSE_CATEGORY } from '../src/expense-categories.js'
 import { calculatePayroll, type PayrollRecord, type PayrollSettlement, type PayrollTemplate, type WorkerRecord } from './payroll.js'
 
 const amount = z.string().regex(/^(0|[1-9]\d{0,11})(\.\d{1,2})?$/, 'Usa un monto válido con hasta dos decimales.')
@@ -12,17 +13,17 @@ const weeklyLineSchema = z.object({
   allocations: z.array(z.object({ ...destination, amount: positive }).strict()).min(1).max(100),
 }).strict()
 const generalExpenseSchema = z.object({
-  id: z.uuid(), concept: z.string().trim().min(1).max(200), amount: positive,
+  id: z.uuid(), concept: z.string().trim().min(1).max(200), category: z.string().trim().min(1).max(100), amount: positive,
   notes: z.string().trim().max(1000).default(''), ...destination,
 }).strict()
 const weeklyInputSchema = z.object({
   id: z.uuid(), version: z.number().int().min(0), idempotencyKey: z.uuid(),
-  periodStart: z.iso.date(), periodEnd: z.iso.date(), lines: z.array(weeklyLineSchema).max(100),
+  name: z.string().trim().max(120).optional(), businessUnit: z.enum(['SPL', '5to Elemento']), periodStart: z.iso.date(), periodEnd: z.iso.date(), lines: z.array(weeklyLineSchema).max(100),
   expenses: z.array(generalExpenseSchema).max(100),
 }).strict().refine(input => input.lines.length + input.expenses.length > 0, 'Agrega un trabajador o un gasto.')
 const teamInputSchema = z.object({
   id: z.uuid(), version: z.number().int().min(0), idempotencyKey: z.uuid(), name: z.string().trim().min(1).max(120),
-  isDefault: z.boolean(), lines: z.array(weeklyLineSchema.omit({ id: true, allocations: true })).min(1).max(100),
+  isDefault: z.boolean(), businessUnit: z.enum(['SPL', '5to Elemento']), lines: z.array(weeklyLineSchema.omit({ id: true, allocations: true })).min(1).max(100),
   expenses: z.array(generalExpenseSchema.omit({ id: true, scope: true, eventId: true })).max(100),
 }).strict()
 const paymentInputSchema = z.object({ version: z.number().int().min(1), idempotencyKey: z.uuid(), paymentDate: z.iso.date() }).strict()
@@ -36,18 +37,21 @@ export type WeeklyLine = Omit<PayrollRecord, 'paidAmount' | 'outstandingAmount'>
 export type BatchPayment = { id: string; paymentDate: string; amount: string; actor: string; at: string; reversedAt?: string; reversalReason?: string }
 export type Operation = { key: string; fingerprint: string }
 export type WeeklyBatch = {
-  id: string; version: number; periodStart: string; periodEnd: string; status: 'unpaid' | 'paid'; historical?: boolean;
+  id: string; version: number; name?: string; businessUnit: BusinessUnit; periodStart: string; periodEnd: string; status: 'unpaid' | 'paid'; historical?: boolean;
   lines: WeeklyLine[]; expenses: GeneralExpense[]; wagesTotal: string; expensesTotal: string; total: string;
   history: Audit[]; payments: BatchPayment[]; operations: Operation[];
 }
 export type TeamTemplate = Omit<TeamInput, 'idempotencyKey'> & { operations: Operation[] }
 export type LegacyEntry = PayrollRecord & { archivedDraft?: boolean }
-export type WeeklyState = { schemaVersion: 2; batches: WeeklyBatch[]; templates: TeamTemplate[]; migrated: boolean; legacy: LegacyEntry[]; legacySettlements: PayrollSettlement[]; importedWorkers: WorkerRecord[]; archive: unknown[] }
+export type QuickExpense = { id: string; name: string; category: string; amount: string; expenseDate: string; businessUnit: BusinessUnit; notes: string; paymentMethod: 'cash' | 'card' | null; createdBy: string; createdAt: string }
+export type DirectIncome = { id: string; name: string; amount: string; expectedDate: string; receivedDate: string | null; businessUnit: BusinessUnit; notes?: string | null; version: number; createdBy: string; createdAt: string; receivedBy?: string; receivedAt?: string; deletedAt?: string; deletedBy?: string }
+export type DirectIncomeAudit = { incomeId: string; actor: string; at: string; action: 'created' | 'received' | 'deleted'; before: DirectIncome | null; after: DirectIncome }
+export type WeeklyState = { schemaVersion: 3; batches: WeeklyBatch[]; templates: TeamTemplate[]; quickExpenses: QuickExpense[]; directIncomes: DirectIncome[]; directIncomeAudit: DirectIncomeAudit[]; migrated: boolean; legacy: LegacyEntry[]; legacySettlements: PayrollSettlement[]; importedWorkers: WorkerRecord[]; archive: unknown[] }
 export interface WeeklyStore {
   readWeekly(): Promise<WeeklyState>
   transactWeekly<T>(operation: (state: WeeklyState) => T | Promise<T>): Promise<T>
 }
-export const emptyWeekly = (): WeeklyState => ({ schemaVersion: 2, batches: [], templates: [], migrated: false, legacy: [], legacySettlements: [], importedWorkers: [], archive: [] })
+export const emptyWeekly = (): WeeklyState => ({ schemaVersion: 3, batches: [], templates: [], quickExpenses: [], directIncomes: [], directIncomeAudit: [], migrated: false, legacy: [], legacySettlements: [], importedWorkers: [], archive: [] })
 function conflict(message: string): never { throw Object.assign(new Error(message), { statusCode: 409 }) }
 const audit = (principal: Principal, reason: string, before: unknown, after: unknown): Audit => ({ actor: principal.userId, at: new Date().toISOString(), reason, before: structuredClone(before), after: structuredClone(after) })
 const fingerprint = (raw: unknown) => createHash('sha256').update(JSON.stringify(raw)).digest('hex')
@@ -64,9 +68,30 @@ const stableId = (value: string) => { const hash = createHash('sha256').update(v
 export function upgradeWeekly(raw: unknown): WeeklyState {
   if (!raw || typeof raw !== 'object') throw new Error('El archivo de nóminas no es válido.')
   const old = raw as Record<string, any>
-  if (old.schemaVersion === 2) {
+  if (old.schemaVersion === 2 || old.schemaVersion === 3) {
     for (const key of ['batches','templates','legacy','legacySettlements','importedWorkers','archive']) if (!Array.isArray(old[key])) throw new Error('El archivo de nóminas no es válido.')
-    return structuredClone(old) as WeeklyState
+    if (old.quickExpenses !== undefined && !Array.isArray(old.quickExpenses)) throw new Error('El archivo de gastos no es válido.')
+    if (old.directIncomes !== undefined && !Array.isArray(old.directIncomes)) throw new Error('El archivo de utilidades no es válido.')
+    if (old.directIncomeAudit !== undefined && !Array.isArray(old.directIncomeAudit)) throw new Error('La auditoría de utilidades no es válida.')
+    const upgraded = structuredClone(old) as WeeklyState
+    upgraded.schemaVersion = 3
+    upgraded.quickExpenses ??= []
+    upgraded.directIncomes ??= []
+    upgraded.directIncomeAudit ??= []
+    for (const expense of upgraded.quickExpenses) {
+      if ((expense.businessUnit as string) === 'SPL consolidado') expense.businessUnit = 'SPL'
+      expense.notes ??= ''
+      expense.paymentMethod ??= null
+    }
+    for (const batch of upgraded.batches) {
+      batch.businessUnit ??= 'SPL'
+      for (const expense of batch.expenses) expense.category ??= DEFAULT_EXPENSE_CATEGORY
+    }
+    for (const template of upgraded.templates) {
+      template.businessUnit ??= 'SPL'
+      for (const expense of template.expenses) expense.category ??= DEFAULT_EXPENSE_CATEGORY
+    }
+    return upgraded
   }
   const state = emptyWeekly()
   if (!Object.keys(old).length) return state
@@ -79,7 +104,7 @@ export function upgradeWeekly(raw: unknown): WeeklyState {
     }
     state.legacySettlements.push(...(batch.settlements ?? []))
   }
-  state.templates = old.templates.map((item: any) => ({ ...item, expenses: [], operations: [] }))
+  state.templates = old.templates.map((item: any) => ({ ...item, businessUnit: 'SPL', expenses: [], operations: [] }))
   return state
 }
 
@@ -94,18 +119,19 @@ export function migrateWeekly(state: WeeklyState, payroll: PayrollRecord[], temp
       worker = { id: template.employeeId ?? stableId(`template:${template.id}`), name: `Trabajador de ${template.name}`, active: true }
       state.importedWorkers.push(worker)
     }
-    state.templates.push({ id: template.id, version: 1, name: template.name, isDefault: false, lines: [{ employeeId: worker.id, baseCost: template.baseCost, additions: template.additions, deductions: template.deductions }], expenses: [], operations: [] })
+    state.templates.push({ id: template.id, version: 1, name: template.name, isDefault: false, businessUnit: 'SPL', lines: [{ employeeId: worker.id, baseCost: template.baseCost, additions: template.additions, deductions: template.deductions }], expenses: [], operations: [] })
   }
   for (const template of state.templates) for (const line of template.lines) {
     if (![...workers,...state.importedWorkers].some(w=>w.id===line.employeeId)) state.importedWorkers.push({id:line.employeeId,name:`Trabajador de ${template.name}`,active:true})
   }
   state.migrated = true
 }
-function checkDestination(item: { scope: string; eventId?: string | null }, eventIds: Set<string>) {
-  if (item.scope === 'event' && (!item.eventId || !eventIds.has(item.eventId))) conflict('El evento asignado no existe.')
+function checkDestination(item: { scope: string; eventId?: string | null }, events: Map<string, BusinessUnit>, businessUnit: BusinessUnit) {
+  if (item.scope === 'event' && (!item.eventId || !events.has(item.eventId))) conflict('El evento asignado no existe.')
+  if (item.scope === 'event' && events.get(item.eventId!) !== businessUnit) conflict('El evento pertenece a otra unidad de negocio.')
   if (item.scope === 'warehouse' && item.eventId) conflict('Almacén no admite un evento.')
 }
-export function saveWeekly(state: WeeklyState, raw: unknown, workers: WorkerRecord[], eventIds: Set<string>, principal: Principal) {
+export function saveWeekly(state: WeeklyState, raw: unknown, workers: WorkerRecord[], events: Map<string, BusinessUnit>, principal: Principal) {
   const input = weeklyInputSchema.parse(raw), prior = state.batches.find(b => b.id === input.id)
   if (prior && repeated(prior.operations, input.idempotencyKey, input)) return prior
   if ((prior?.version ?? 0) !== input.version) conflict('La nómina cambió. Conservamos tu captura; recarga la versión actual.')
@@ -116,16 +142,16 @@ export function saveWeekly(state: WeeklyState, raw: unknown, workers: WorkerReco
   const lines: WeeklyLine[] = input.lines.map(line => {
     const worker = [...workers, ...state.importedWorkers].find(w => w.id === line.employeeId && w.active)
     if (!worker) conflict('Selecciona un trabajador activo del directorio.')
-    line.allocations.forEach(a => checkDestination(a, eventIds))
+    line.allocations.forEach(a => checkDestination(a, events, input.businessUnit))
     const { calculation } = calculatePayroll({ employeeName: worker.name, periodStart: input.periodStart, periodEnd: input.periodEnd, baseCost: line.baseCost, additions: line.additions, deductions: line.deductions, allocations: line.allocations })
     return { ...line, ...calculation, employeeName: worker.name, periodStart: input.periodStart, periodEnd: input.periodEnd }
   })
-  input.expenses.forEach(item => checkDestination(item, eventIds))
+  input.expenses.forEach(item => checkDestination(item, events, input.businessUnit))
   const wages = lines.reduce((sum, l) => sum.plus(l.netPay), new Decimal(0)), extras = input.expenses.reduce((sum, e) => sum.plus(e.amount), new Decimal(0))
   const batch: WeeklyBatch = {
-    id: input.id, version: input.version + 1, periodStart: input.periodStart, periodEnd: input.periodEnd, status: 'unpaid', lines,
+    id: input.id, version: input.version + 1, name: input.name || undefined, businessUnit: input.businessUnit, periodStart: input.periodStart, periodEnd: input.periodEnd, status: 'unpaid', lines,
     expenses: input.expenses.map(e => ({ ...e, amount: new Decimal(e.amount).toFixed(2) })), wagesTotal: wages.toFixed(2), expensesTotal: extras.toFixed(2), total: wages.plus(extras).toFixed(2),
-    payments: prior?.payments ?? [], history: [...(prior?.history ?? []), audit(principal, prior ? 'Nómina actualizada' : 'Nómina creada', prior ? { lines: prior.lines, expenses: prior.expenses, periodStart: prior.periodStart, periodEnd: prior.periodEnd } : null, { lines, expenses: input.expenses, periodStart: input.periodStart, periodEnd: input.periodEnd })],
+    payments: prior?.payments ?? [], history: [...(prior?.history ?? []), audit(principal, prior ? 'Nómina actualizada' : 'Nómina creada', prior ? { name: prior.name, businessUnit: prior.businessUnit, lines: prior.lines, expenses: prior.expenses, periodStart: prior.periodStart, periodEnd: prior.periodEnd } : null, { name: input.name, businessUnit: input.businessUnit, lines, expenses: input.expenses, periodStart: input.periodStart, periodEnd: input.periodEnd })],
     operations: [...(prior?.operations ?? []), operation(input.idempotencyKey, input)],
   }
   state.batches = [...state.batches.filter(b => b.id !== batch.id), batch]
@@ -163,7 +189,6 @@ export function deleteWeekly(state: WeeklyState, batchId: string, raw: unknown, 
   const input = deleteInputSchema.parse(raw), batch = state.batches.find(b => b.id === batchId)
   if (!batch) conflict('La nómina no existe.')
   if (batch.version !== input.version) conflict('La nómina cambió. Recarga antes de eliminarla.')
-  if (batch.status === 'paid' || batch.historical) conflict('Revierte el pago antes de eliminar la nómina.')
   state.archive.push({ kind: 'deleted-weekly-payroll', batch: structuredClone(batch), deletedBy: principal.userId, deletedAt: new Date().toISOString() })
   state.batches = state.batches.filter(b => b.id !== batchId)
   return { id: batchId }
@@ -177,7 +202,7 @@ export function saveTeam(state: WeeklyState, raw: unknown, workers: WorkerRecord
     if (![...workers, ...state.importedWorkers].some(w => w.id === line.employeeId && w.active)) conflict('Trabajador no disponible.')
     if (new Decimal(line.baseCost).plus(line.additions).lt(line.deductions)) conflict('Deducciones inválidas.')
   }
-  if (input.isDefault) state.templates.forEach(t => { if (t.isDefault && t.id !== input.id) { t.isDefault = false; t.version++ } })
+  if (input.isDefault) state.templates.forEach(t => { if (t.isDefault && t.id !== input.id && t.businessUnit === input.businessUnit) { t.isDefault = false; t.version++ } })
   const { idempotencyKey, ...values } = input
   const result: TeamTemplate = { ...values, version: input.version + 1, operations: [...(prior?.operations ?? []), operation(idempotencyKey, input)] }
   state.templates = [...state.templates.filter(t => t.id !== input.id), result]
@@ -189,5 +214,5 @@ export function payrollProjection(state: WeeklyState): PayrollRecord[] {
   return [...state.legacy.filter(l => !l.archivedDraft), ...state.batches.flatMap(b => b.lines.map(l => ({ ...l, paidAmount: b.status === 'paid' ? l.netPay : '0.00', outstandingAmount: b.status === 'paid' ? '0.00' : l.netPay })))]
 }
 export function expenseProjection(state: WeeklyState) {
-  return state.batches.flatMap(b => b.expenses.map(e => ({ id: `payroll:${b.id}:${e.id}`, eventId: e.eventId ?? '', name: e.concept, category: 'Gastos de nómina', expenseDate: b.periodEnd, amount: e.amount, paidAmount: b.status === 'paid' ? e.amount : '0.00', notes: e.notes, version: b.version, source: 'payroll' as const, payrollId: b.id, scope: e.scope })))
+  return state.batches.flatMap(b => b.expenses.map(e => ({ id: `payroll:${b.id}:${e.id}`, eventId: e.eventId ?? '', businessUnit: b.businessUnit, name: e.concept, category: e.category, expenseDate: b.periodEnd, amount: e.amount, paidAmount: b.status === 'paid' ? e.amount : '0.00', notes: e.notes, version: b.version, source: 'payroll' as const, payrollId: b.id, scope: e.scope })))
 }

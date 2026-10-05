@@ -25,7 +25,7 @@ export class DevelopmentStore implements SessionStore, EventRepository, PayrollS
   private weeklyQueue = Promise.resolve()
   private eventPaymentQueue = Promise.resolve()
   async findUserByEmail(email:string){return this.users.find(user=>user.email===email)??null}
-  async findOrCreateGoogleUser(email:string,displayName:string,role:Role,businessUnit:BusinessUnit|null){let user=await this.findUserByEmail(email);if(!user){user={id:randomUUID(),email,displayName,role,businessUnit,passwordHash:null,active:true};this.users.push(user)}return user}
+  async findOrCreateGoogleUser(email:string,displayName:string,role:Role,businessUnit:BusinessUnit|null){let user=await this.findUserByEmail(email);if(!user){user={id:randomUUID(),email,displayName,role,businessUnit,passwordHash:null,active:true};this.users.push(user)}else{user.displayName=displayName;user.role=role;user.businessUnit=businessUnit}return user}
   async createSession(userId:string,tokenHash:string,expiresAt:Date){this.sessions.set(tokenHash,{userId,expiresAt,revoked:false})}
   async findPrincipal(tokenHash:string,now:Date){const session=this.sessions.get(tokenHash),user=session&&this.users.find(item=>item.id===session.userId);if(!session||session.revoked||session.expiresAt<=now||!user?.active)return null;return {userId:user.id,email:user.email,displayName:user.displayName,role:user.role,unit:user.businessUnit}}
   async revokeSession(tokenHash:string){const session=this.sessions.get(tokenHash);if(session)session.revoked=true}

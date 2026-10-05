@@ -3303,7 +3303,7 @@ dependencies = [
 
 [[package]]
 name = "spl"
-version = "0.3.4"
+version = "0.3.12"
 dependencies = [
  "tauri",
  "tauri-build",

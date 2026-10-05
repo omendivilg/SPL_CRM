@@ -1,7 +1,7 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
   "productName": "SPL Control Financiero",
-  "version": "0.3.4",
+  "version": "0.3.12",
   "identifier": "mx.spl.control-financiero",
   "build": {
     "frontendDist": "../dist",

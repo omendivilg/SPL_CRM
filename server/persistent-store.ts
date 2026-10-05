@@ -49,8 +49,8 @@ export class PersistentDevelopmentStore extends DevelopmentStore {
       this.payrollSettlements = parsed.payrollSettlements
       this.workers = parsed.workers
       this.payrollTemplates = parsed.payrollTemplates
-      if (!parsed.weekly || (parsed.weekly as {schemaVersion?:number}).schemaVersion !== 2) {
-        await copyFile(this.filePath, `${this.filePath}.before-payroll-v2.bak`, constants.COPYFILE_EXCL).catch(error => { if (error.code !== 'EEXIST') throw error })
+      if (!parsed.weekly || (parsed.weekly as {schemaVersion?:number}).schemaVersion !== 3) {
+        await copyFile(this.filePath, `${this.filePath}.before-payroll-v3.bak`, constants.COPYFILE_EXCL).catch(error => { if (error.code !== 'EEXIST') throw error })
       }
       this.weekly = parsed.weekly ? upgradeWeekly(parsed.weekly) : this.weekly
     } catch (error) {
