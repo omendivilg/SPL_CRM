@@ -36,6 +36,7 @@ pub fn run() {
         .arg(backend_script)
         .env("SPL_DATA_DIR", data_dir)
         .env("SPL_FRONTEND_DIR", frontend_dir)
+        .env("SPL_API_URL", "https://spl-crm.fly.dev")
         .env("PORT", port.to_string())
         .env("SPL_PARENT_PID", std::process::id().to_string())
         .env("NODE_ENV", "production")

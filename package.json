@@ -25,6 +25,7 @@
     "start:local-server": "tsx server/dev-entry.ts",
     "test": "vitest run server src --exclude build-server/**",
     "test:e2e": "playwright test",
+    "test:docker": "node scripts/smoke-docker.mjs",
     "preview": "vite preview"
   },
   "devDependencies": {
@@ -54,7 +55,7 @@
     "decimal.js": "^10.6.0",
     "dotenv": "^17.4.2",
     "exceljs": "^4.4.0",
-    "fastify": "^5.12.4",
+    "fastify": "^5.12.5",
     "google-auth-library": "^11.0.2",
     "lucide-react": "^1.46.0",
     "pg": "^8.23.0",

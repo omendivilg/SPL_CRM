@@ -79,6 +79,7 @@ export const eventApi = {
   settleExpense:(expenseId:string,input:{paymentDate:string;amount:string;idempotencyKey:string})=>request<ApiSettlement>(`/api/expenses/${encodeURIComponent(expenseId)}/settlements`,{method:'POST',body:JSON.stringify(input)},false),
 }
 export const authApi={
+  googleConfig:()=>request<{clientId:string|null}>('/api/auth/google/config',{},false),
   me:()=>request<SessionUser>('/api/auth/me',{},false),
   login:(email:string,password:string)=>request<SessionUser>('/api/auth/login',{method:'POST',body:JSON.stringify({email,password})},false),
   google:(credential:string)=>request<SessionUser>('/api/auth/google',{method:'POST',body:JSON.stringify({credential})},false),

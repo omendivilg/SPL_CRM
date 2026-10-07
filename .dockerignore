@@ -8,6 +8,14 @@ test-results
 outputs
 .git
 .env*
+**/.env*
+**/*.pem
+**/*.key
+**/*.p12
+**/*.pfx
+**/*oauth*credentials*.json
+.expo
+mobile/.expo-export-check
 mobile/node_modules
 mobile/dist-ios
 mobile/.expo

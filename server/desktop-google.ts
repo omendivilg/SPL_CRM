@@ -12,9 +12,10 @@ const callbackSchema=z.union([
 const statusSchema=z.object({flowId:z.uuid()}).strict()
 const tokenSchema=z.object({access_token:z.string().min(20).max(8192)})
 const identitySchema=z.object({email:z.email().max(320),name:z.string().min(1).max(160),email_verified:z.boolean()})
-type Flow={state:string;verifier:string;expiresAt:number;status:'pending'|'processing'|'complete'|'error';user?:LoginUser;failure?:string}
+type CloudSession={user:unknown;token:string;expiresAt:string}
+type Flow={state:string;verifier:string;expiresAt:number;status:'pending'|'processing'|'complete'|'error';user?:LoginUser;cloudSession?:CloudSession;failure?:string}
 
-export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store:SessionStore;clientId?:string;clientSecret?:string;redirectBase:string;fetcher?:typeof fetch}) {
+export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store?:SessionStore;exchangeIdentity?:(credential:string)=>Promise<CloudSession>;clientId?:string;clientSecret?:string;redirectBase:string;fetcher?:typeof fetch}) {
   const flows=new Map<string,Flow>(),fetcher=options.fetcher??fetch
   const cleanup=()=>{const now=Date.now();for(const [id,flow] of flows)if(flow.expiresAt<=now)flows.delete(id)}
   app.get('/api/auth/google/desktop/config',async()=>({data:{enabled:Boolean(options.clientId&&options.clientSecret)}}))
@@ -38,18 +39,26 @@ export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store:S
     flow.status='processing';flows.set(flowId,flow)
     let failure='Google rechazó el intercambio del código. Revisa el cliente OAuth de escritorio.'
     try{
-      const tokenResponse=await fetcher('https://oauth2.googleapis.com/token',{method:'POST',headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:options.clientId,client_secret:options.clientSecret,code:input.code,code_verifier:flow.verifier,grant_type:'authorization_code',redirect_uri:redirectUri})})
+      const tokenResponse=await fetcher('https://oauth2.googleapis.com/token',{method:'POST',redirect:'error',signal:AbortSignal.timeout(15_000),headers:{'content-type':'application/x-www-form-urlencoded'},body:new URLSearchParams({client_id:options.clientId,client_secret:options.clientSecret,code:input.code,code_verifier:flow.verifier,grant_type:'authorization_code',redirect_uri:redirectUri})})
       if(!tokenResponse.ok)throw new Error('token exchange rejected')
-      const token=tokenSchema.parse(await tokenResponse.json())
+      const tokenData=await tokenResponse.json()
+      if(options.exchangeIdentity){
+        const {id_token}=z.object({id_token:z.string().min(100).max(10000)}).parse(tokenData)
+        failure='El servidor no pudo autorizar esta cuenta. Revisa la conexión y la configuración de Google.'
+        flow.cloudSession=await options.exchangeIdentity(id_token)
+        flow.status='complete';flows.set(flowId,flow)
+        return reply.type('text/html; charset=utf-8').send('<!doctype html><meta charset="utf-8"><title>SPL</title><p>Acceso completado. Ya puedes cerrar esta ventana y volver a SPL.</p>')
+      }
+      const token=tokenSchema.parse(tokenData)
       failure='No se pudo consultar la identidad de Google.'
-      const identityResponse=await fetcher('https://openidconnect.googleapis.com/v1/userinfo',{headers:{authorization:`Bearer ${token.access_token}`}})
+      const identityResponse=await fetcher('https://openidconnect.googleapis.com/v1/userinfo',{redirect:'error',signal:AbortSignal.timeout(15_000),headers:{authorization:`Bearer ${token.access_token}`}})
       if(!identityResponse.ok)throw new Error('identity rejected')
       const identity=identitySchema.parse(await identityResponse.json()),email=identity.email.toLowerCase()
       failure='Esta cuenta no está autorizada o no tiene el correo verificado.'
       const {allowed,role}=googleAccess(email)
       if(!identity.email_verified||!allowed)throw new Error('identity not allowed')
       failure='No se pudo guardar el usuario en SPL.'
-      const user=await options.store.findOrCreateGoogleUser(email,identity.name,role,role==='coordinator'?'5to Elemento':null)
+      const user=await options.store!.findOrCreateGoogleUser(email,identity.name,role,role==='coordinator'?'5to Elemento':null)
       if(!user.active){failure='Esta cuenta está desactivada en SPL.';throw new Error('identity inactive')}
       flow.user=user;flow.status='complete';flows.set(flowId,flow)
       return reply.type('text/html; charset=utf-8').send('<!doctype html><meta charset="utf-8"><title>SPL</title><p>Acceso completado. Ya puedes cerrar esta ventana y volver a SPL.</p>')
@@ -61,6 +70,10 @@ export function registerDesktopGoogleRoutes(app:FastifyInstance,options:{store:S
     if(flow.status==='error')return reply.code(400).send({error:flow.failure??'No se pudo autorizar la cuenta'})
     if(flow.status==='pending'||flow.status==='processing')return reply.code(202).send({data:{status:'pending'}})
     flows.delete(flowId)
-    return {data:{status:'complete',user:await issueSession(reply,options.store,flow.user!)}}
+    if(flow.cloudSession){
+      reply.setCookie('spl_session',flow.cloudSession.token,{httpOnly:true,sameSite:'strict',secure:false,path:'/',maxAge:Math.max(0,Math.floor((Date.parse(flow.cloudSession.expiresAt)-Date.now())/1000))})
+      return {data:{status:'complete',user:flow.cloudSession.user}}
+    }
+    return {data:{status:'complete',user:await issueSession(reply,options.store!,flow.user!)}}
   })
 }

@@ -16,6 +16,7 @@ import ReactDOM from 'react-dom/client'
 import { CalendarDays, Check, ChevronDown, CircleDollarSign, Database, Download, LayoutDashboard, Menu, MoreHorizontal, Plus, Search, Settings, ShieldCheck, Trash2, Users, WalletCards, Wifi, X } from 'lucide-react'
 import { authApi, desktopGoogleApi, directIncomeApi, eventApi, healthApi, payrollApi, quickExpenseApi, reportApi, testLoginApi, weeklyPayrollApi, type ApiDirectIncome, type ApiEvent, type ApiExpense, type ApiPayment, type ApiPayroll, type ApiQuickExpense, type ApiWeeklyPayroll, type CreateEventInput, type SessionUser } from './api'
 import {openDesktopAuthorization,waitForDesktopGoogle} from './desktop-auth'
+import { ApiError } from './api'
 import {defaultPreferences,parsePreferences,type Preferences} from './settings'
 import './styles.css'
 type Scope = 'Todos' | 'SPL' | '5to Elemento'
@@ -191,7 +192,7 @@ function SettingsPage({user}:{user:SessionUser}){
   React.useEffect(()=>{healthApi.status().then(()=>setConnection('online')).catch(()=>setConnection('offline'))},[])
   const save=()=>{localStorage.setItem('spl_preferences',JSON.stringify(preferences));document.documentElement.dataset.compact=preferences.compactMode?'true':'false';setSaved(true);setTimeout(()=>setSaved(false),1800)}
   const reset=()=>{setPreferences(defaultPreferences);localStorage.removeItem('spl_preferences');document.documentElement.dataset.compact='false'}
-  return <div className="content settings-page"><section className="page-heading"><div><p className="eyebrow">Preferencias y acceso</p><h1>Configuración</h1><p>Administra tu experiencia, conexión y datos de la cuenta.</p></div></section><section className="settings-grid"><article className="panel settings-card"><div className="settings-title"><ShieldCheck size={20}/><div><h2>Cuenta y seguridad</h2><p>Sesión individual autorizada</p></div></div><dl><div><dt>Nombre</dt><dd>{user.displayName}</dd></div><div><dt>Correo</dt><dd>{user.email}</dd></div><div><dt>Perfil</dt><dd>{user.role==='coordinator'?'Coordinación':'Administrador'}</dd></div><div><dt>Duración de sesión</dt><dd>180 días en este equipo</dd></div></dl></article><article className="panel settings-card"><div className="settings-title"><Wifi size={20}/><div><h2>Conexión</h2><p>Estado de servicios locales</p></div></div><div className={`connection-status ${connection}`}><i/><span>{connection==='checking'?'Comprobando conexión':connection==='online'?'Backend conectado':'Backend sin conexión'}</span></div><div className="settings-fact"><Database size={17}/><span><strong>Datos centralizados</strong><small>La interfaz no almacena contraseñas ni secretos de Google.</small></span></div></article><form className="panel preferences-card" onSubmit={event=>{event.preventDefault();save()}}><h2>Preferencias</h2><div className="preferences-fields"><label>Unidad predeterminada<select value={preferences.defaultUnit} onChange={event=>setPreferences({...preferences,defaultUnit:event.target.value as Preferences['defaultUnit']})}><option>SPL</option><option>5to Elemento</option></select></label><label>Mes sugerido para reportes<select value={preferences.reportMonth} onChange={event=>setPreferences({...preferences,reportMonth:event.target.value as Preferences['reportMonth']})}><option value="current">Mes actual</option><option value="previous">Mes anterior</option></select></label><label className="toggle-row"><span><strong>Vista compacta</strong><small>Reduce espacios en tablas extensas.</small></span><input type="checkbox" checked={preferences.compactMode} onChange={event=>setPreferences({...preferences,compactMode:event.target.checked})}/></label></div><div className="settings-actions"><button type="button" onClick={reset}>Restablecer</button><button className="primary">{saved?'Guardado':'Guardar cambios'}</button></div></form></section></div>
+  return <div className="content settings-page"><section className="page-heading"><div><p className="eyebrow">Preferencias y acceso</p><h1>Configuración</h1><p>Administra tu experiencia, conexión y datos de la cuenta.</p></div></section><section className="settings-grid"><article className="panel settings-card"><div className="settings-title"><ShieldCheck size={20}/><div><h2>Cuenta y seguridad</h2><p>Sesión individual autorizada</p></div></div><dl><div><dt>Nombre</dt><dd>{user.displayName}</dd></div><div><dt>Correo</dt><dd>{user.email}</dd></div><div><dt>Perfil</dt><dd>{user.role==='coordinator'?'Coordinación':'Administrador'}</dd></div><div><dt>Duración de sesión</dt><dd>180 días en este equipo</dd></div></dl></article><article className="panel settings-card"><div className="settings-title"><Wifi size={20}/><div><h2>Conexión</h2><p>Estado de conexión con el servidor</p></div></div><div className={`connection-status ${connection}`}><i/><span>{connection==='checking'?'Comprobando conexión':connection==='online'?'Servidor conectado':'Servidor sin conexión'}</span></div><div className="settings-fact"><Database size={17}/><span><strong>Datos centralizados</strong><small>La interfaz no almacena contraseñas ni secretos de Google.</small></span></div></article><form className="panel preferences-card" onSubmit={event=>{event.preventDefault();save()}}><h2>Preferencias</h2><div className="preferences-fields"><label>Unidad predeterminada<select value={preferences.defaultUnit} onChange={event=>setPreferences({...preferences,defaultUnit:event.target.value as Preferences['defaultUnit']})}><option>SPL</option><option>5to Elemento</option></select></label><label>Mes sugerido para reportes<select value={preferences.reportMonth} onChange={event=>setPreferences({...preferences,reportMonth:event.target.value as Preferences['reportMonth']})}><option value="current">Mes actual</option><option value="previous">Mes anterior</option></select></label><label className="toggle-row"><span><strong>Vista compacta</strong><small>Reduce espacios en tablas extensas.</small></span><input type="checkbox" checked={preferences.compactMode} onChange={event=>setPreferences({...preferences,compactMode:event.target.checked})}/></label></div><div className="settings-actions"><button type="button" onClick={reset}>Restablecer</button><button className="primary">{saved?'Guardado':'Guardar cambios'}</button></div></form></section></div>
 }
 function LoginScreen({onLogin}:{onLogin:(user:SessionUser)=>void}){
   const [email,setEmail]=React.useState(''),[password,setPassword]=React.useState(''),[error,setError]=React.useState(''),[busy,setBusy]=React.useState(false),[testBusy,setTestBusy]=React.useState(false),[desktopGoogle,setDesktopGoogle]=React.useState<boolean|null|undefined>(undefined),[testLogin,setTestLogin]=React.useState(false)
@@ -202,29 +203,50 @@ function LoginScreen({onLogin}:{onLogin:(user:SessionUser)=>void}){
   const googleButton=React.useRef<HTMLDivElement>(null)
   React.useEffect(()=>{
     let active=true
-    desktopGoogleApi.config().then(result=>{if(active)setDesktopGoogle(result.enabled)}).catch(()=>{if(active)setDesktopGoogle(false)})
+    desktopGoogleApi.config().then(result=>{if(active)setDesktopGoogle(result.enabled)}).catch(error=>{if(active)setDesktopGoogle(error instanceof ApiError&&error.status===404?null:false)})
     testLoginApi.config().then(result=>{if(active)setTestLogin(result.enabled)}).catch(()=>{})
     return()=>{active=false}
   },[])
   React.useEffect(()=>{
     if(desktopGoogle!==null)return
-    const clientId=import.meta.env.VITE_GOOGLE_CLIENT_ID
-    if(!clientId)return
-    const render=()=>{
-      if(!window.google||!googleButton.current)return
-      window.google.accounts.id.initialize({client_id:clientId,callback:async({credential})=>{
-        setBusy(true)
-        setError('')
-        try{onLogin(await authApi.google(credential))}catch{setError('No pudimos autorizar esta cuenta de Google.')}finally{setBusy(false)}
-      }})
-      window.google.accounts.id.renderButton(googleButton.current,{theme:'filled_black',size:'large',text:'continue_with',shape:'rectangular',width:342,locale:'es'})
-    }
-    const script=document.createElement('script')
-    script.src='https://accounts.google.com/gsi/client'
-    script.async=true
-    script.onload=render
-    document.head.appendChild(script)
-    return()=>script.remove()
+    let active=true
+    let script:HTMLScriptElement|undefined
+    let resizeObserver:ResizeObserver|undefined
+    void (async()=>{
+      const config=await authApi.googleConfig().catch(()=>({clientId:null}))
+      if(!active)return
+      const clientId=config.clientId??import.meta.env.VITE_GOOGLE_CLIENT_ID
+      if(!clientId){setError('Acceso con Google no configurado.');return}
+      const render=()=>{
+        if(!active||!window.google||!googleButton.current)return
+        window.google.accounts.id.initialize({client_id:clientId,callback:async({credential})=>{
+          if(!active)return
+          setBusy(true)
+          setError('')
+          try{const user=await authApi.google(credential);if(active)onLogin(user)}catch{if(active)setError('No pudimos autorizar esta cuenta de Google.')}finally{if(active)setBusy(false)}
+        }})
+        let renderedWidth=0
+        const renderButton=()=>{
+          const element=googleButton.current
+          if(!active||!window.google||!element)return
+          const width=Math.min(342,Math.floor(element.clientWidth))
+          if(width<=0||width===renderedWidth)return
+          renderedWidth=width
+          element.replaceChildren()
+          window.google.accounts.id.renderButton(element,{theme:'filled_black',size:'large',text:'continue_with',shape:'rectangular',width,locale:'es'})
+        }
+        resizeObserver=new ResizeObserver(renderButton)
+        resizeObserver.observe(googleButton.current)
+        renderButton()
+      }
+      script=document.createElement('script')
+      script.src='https://accounts.google.com/gsi/client'
+      script.async=true
+      script.onload=render
+      script.onerror=()=>{if(active)setError('No pudimos cargar Google. Revisa tu conexión e intenta nuevamente.')}
+      document.head.appendChild(script)
+    })()
+    return()=>{active=false;resizeObserver?.disconnect();script?.remove()}
   },[desktopGoogle,onLogin])
   return <main className="login-page"><section className="login-panel"><div className="login-brand"><img className="brand-logo" src="/spl-logo.png" alt="Logotipo SPL" /><div><strong>SPL</strong><span>Control de eventos y finanzas</span></div></div><div className="login-copy"><p className="eyebrow">Acceso seguro</p><h1>Bienvenido</h1><p>Ingresa con una cuenta autorizada para continuar.</p></div>{desktopGoogle===true?<button className="desktop-google-button" type="button" disabled={busy} onClick={()=>void loginWithDesktopGoogle()}>{busy?'Esperando autorización...':'Continuar con Google nuevamente'}</button>:desktopGoogle===false?<div className="login-error" role="alert">No se pudo verificar Google para Windows. Revisa la configuración o vuelve a abrir la aplicación.</div>:<div className="google-button" ref={googleButton}/>} {testLogin&&<button className="test-login-button" type="button" disabled={testBusy} onClick={()=>void enterTestMode()}>{testBusy?'Abriendo modo de pruebas...':'Entrar en modo de pruebas'}</button>}<div className="login-divider"><span>o usa tu cuenta existente</span></div><form onSubmit={submit}><label>Correo electrónico<input type="email" autoComplete="username" value={email} onChange={e=>setEmail(e.target.value)} required/></label><label>Contraseña<input type="password" autoComplete="current-password" minLength={8} maxLength={128} value={password} onChange={e=>setPassword(e.target.value)} required/></label>{error&&<div className="login-error" role="alert">{error}</div>}<button className="primary" disabled={busy}>{busy?'Verificando...':'Iniciar sesión'}</button></form><small>La sesión permanece activa en este equipo de confianza.</small></section></main>
 }

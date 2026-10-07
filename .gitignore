@@ -15,6 +15,7 @@ src-tauri/binaries
 src-tauri/target
 dist-ssr
 test-results
+outputs
 *.local
 .env
 !.env.example

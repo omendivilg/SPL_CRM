@@ -6,6 +6,7 @@ import { buildApp } from './app.js'
 import { sessionAuthenticator } from './auth.js'
 import { PersistentDevelopmentStore } from './persistent-store.js'
 import { registerDesktopGoogleRoutes } from './desktop-google.js'
+import { buildRemoteDesktop } from './desktop-remote.js'
 
 declare const __GOOGLE_DESKTOP_CLIENT_ID__: string
 declare const __GOOGLE_DESKTOP_CLIENT_SECRET__: string
@@ -36,15 +37,9 @@ const verifyGoogle = async (credential: string) => {
 
 async function main() {
   if (!Number.isSafeInteger(parentProcessId) || parentProcessId <= 0) throw new Error('SPL_PARENT_PID must be a positive integer')
-  const store = await PersistentDevelopmentStore.open(resolve(dataDirectory, 'spl-data.json'))
-  const app = buildApp(store, sessionAuthenticator(store), store, verifyGoogle, store, store)
   const port = Number(process.env.PORT ?? 3001)
-  registerDesktopGoogleRoutes(app, {
-    store,
-    clientId: __GOOGLE_DESKTOP_CLIENT_ID__,
-    clientSecret: __GOOGLE_DESKTOP_CLIENT_SECRET__,
-    redirectBase: `http://127.0.0.1:${port}`,
-  })
+  const apiUrl=process.env.SPL_API_URL
+  const app=apiUrl?await buildRemoteDesktop({apiUrl,clientId:__GOOGLE_DESKTOP_CLIENT_ID__,clientSecret:__GOOGLE_DESKTOP_CLIENT_SECRET__,redirectBase:`http://127.0.0.1:${port}`}):await buildLocalDesktop(port)
   app.addHook('onSend', async (_request, reply, payload) => {
     reply.header('Content-Security-Policy', "default-src 'self'; connect-src 'self' https://accounts.google.com; script-src 'self' https://accounts.google.com/gsi/client; frame-src https://accounts.google.com; img-src 'self' data: https://*.googleusercontent.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com")
     return payload
@@ -60,6 +55,13 @@ async function main() {
   }, 2000)
   parentMonitor.unref()
   for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => void app.close().finally(() => process.exit(0)))
+}
+
+async function buildLocalDesktop(port:number){
+  const store=await PersistentDevelopmentStore.open(resolve(dataDirectory,'spl-data.json'))
+  const app=buildApp(store,sessionAuthenticator(store),store,verifyGoogle,store,store)
+  registerDesktopGoogleRoutes(app,{store,clientId:__GOOGLE_DESKTOP_CLIENT_ID__,clientSecret:__GOOGLE_DESKTOP_CLIENT_SECRET__,redirectBase:`http://127.0.0.1:${port}`})
+  return app
 }
 
 void main().catch(error => {

@@ -17,7 +17,7 @@ import {saveQuickExpense} from './quick-expense.js'
 import { deleteDirectIncome, receiveDirectIncome, saveDirectIncome } from './direct-income.js'
 import {z} from 'zod'
 
-export function buildApp(repository: EventRepository, authenticate: Authenticator, sessions?:SessionStore,verifyGoogle?:GoogleVerifier,payroll?:PayrollStore,weekly?:WeeklyStore) {
+export function buildApp(repository: EventRepository, authenticate: Authenticator, sessions?:SessionStore,verifyGoogle?:GoogleVerifier,payroll?:PayrollStore,weekly?:WeeklyStore, options: { checkHealth?: () => Promise<void> } = {}) {
   const app = Fastify({ bodyLimit: 32 * 1024, logger: false })
   app.register(helmet, { contentSecurityPolicy: false })
   app.register(cors, { origin: false })
@@ -25,7 +25,8 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
   app.register(rateLimit,{global:false})
   if(sessions)app.after(()=>registerAuthRoutes(app,sessions,verifyGoogle))
   app.addHook('onRequest', async (request, reply) => {
-    if (!request.url.startsWith('/api/') || request.url === '/api/auth/login' || request.url === '/api/auth/google' || request.url === '/api/auth/google/native' || request.url === '/api/auth/test-login' || request.url === '/api/auth/test-login/config' || request.url.startsWith('/api/auth/google/desktop/')) return
+    const route = request.routeOptions.url ?? request.url.split('?')[0]
+    if (!route.startsWith('/api/') || route === '/api/auth/login' || route === '/api/auth/google' || route === '/api/auth/google/config' || route === '/api/auth/google/native' || route === '/api/auth/test-login' || route === '/api/auth/test-login/config' || route.startsWith('/api/auth/google/desktop/')) return
     const principal = await authenticate(request)
     if (!principal) return reply.code(401).send({ error: 'No autorizado' })
     request.principal = principal
@@ -37,7 +38,15 @@ export function buildApp(repository: EventRepository, authenticate: Authenticato
     if (statusCode && statusCode < 500) return reply.code(statusCode).send({ error: statusCode === 409 && error instanceof Error ? error.message : 'Solicitud inválida' })
     return reply.code(500).send({ error: 'Error interno' })
   })
-  app.get('/health', async () => ({ status: 'ok' }))
+  app.get('/health', async (_request, reply) => {
+    reply.header('Cache-Control', 'no-store')
+    try {
+      await options.checkHealth?.()
+      return { status: 'ok' }
+    } catch {
+      return reply.code(503).send({ status: 'unavailable' })
+    }
+  })
   app.get('/api/events', async request => {
     const events = await repository.list(request.principal)
     return { data: request.principal.role === 'coordinator' ? events.map(toCoordinatorEvent) : events }
