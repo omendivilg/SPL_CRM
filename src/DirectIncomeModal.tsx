@@ -1,5 +1,6 @@
 import React from 'react'
 import Decimal from 'decimal.js'
+import { useEntryFormFocus } from './phone-layout'
 import { X } from 'lucide-react'
 import type { ApiDirectIncome } from './api'
 
@@ -7,6 +8,7 @@ type IncomeInput = Pick<ApiDirectIncome, 'name' | 'amount' | 'businessUnit' | 'e
 const today = () => { const value = new Date(); return `${value.getFullYear()}-${String(value.getMonth()+1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}` }
 
 export function DirectIncomeModal({ close, save, defaultUnit }: { close: () => void; save: (id: string, input: IncomeInput) => Promise<void>; defaultUnit: IncomeInput['businessUnit'] }) {
+  const { formRef, nameRef } = useEntryFormFocus()
   const [id] = React.useState(() => crypto.randomUUID())
   const [form, setForm] = React.useState<IncomeInput>({ name: '', amount: '', businessUnit: defaultUnit, expectedDate: today(), receivedDate: null, notes: '' })
   const [paid, setPaid] = React.useState(true)
@@ -22,11 +24,11 @@ export function DirectIncomeModal({ close, save, defaultUnit }: { close: () => v
   }
   return <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Utilidad nueva">
     <button className="modal-backdrop" type="button" aria-label="Cerrar" onClick={close}/>
-    <form className="event-modal compact-modal" onSubmit={event => void submit(event)}>
+    <form ref={formRef} tabIndex={-1} className="event-modal compact-modal" onSubmit={event => void submit(event)}>
       <div className="modal-head"><div><p className="eyebrow">Cobro sin evento</p><h2>Utilidad nueva</h2></div><button type="button" aria-label="Cerrar" onClick={close}><X size={20}/></button></div>
       <p>Registra un ingreso directamente para SPL o 5to Elemento.</p>
       <div className="form-grid">
-        <label className="full">Nombre de la utilidad<input autoFocus required maxLength={200} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
+        <label className="full">Nombre de la utilidad<input ref={nameRef} required maxLength={200} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
         <label>Monto MXN<input required type="number" min="0.01" step="0.01" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })}/></label>
         <label>Compañía<select value={form.businessUnit} onChange={event => setForm({ ...form, businessUnit: event.target.value as IncomeInput['businessUnit'] })}><option value="SPL">SPL</option><option value="5to Elemento">5to Elemento</option></select></label>
         <label>{paid ? 'Fecha de cobro' : 'Fecha prevista'}<input required type="date" value={form.expectedDate} onChange={event => setForm({ ...form, expectedDate: event.target.value })}/></label>

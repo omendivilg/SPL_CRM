@@ -40,7 +40,8 @@ export function CostBreakdown({ costs }: { costs: DashboardCost[] }) {
   </section>
 }
 
-export function WeeklyComparison({ receipts, costs, today }: { receipts: DatedAmount[]; costs: DashboardCost[]; today: string }) {
+export function WeeklyComparison({ receipts, costs, today, rangeKey }: { receipts: DatedAmount[]; costs: DashboardCost[]; today: string; rangeKey: string }) {
+  const chartRef = React.useRef<HTMLDivElement>(null)
   const [page, setPage] = React.useState(0)
   type Metric = 'incoming' | 'expenses' | 'profit' | 'payroll'
   type LineMetric = Exclude<Metric, 'payroll'>
@@ -48,6 +49,41 @@ export function WeeklyComparison({ receipts, costs, today }: { receipts: DatedAm
   React.useEffect(() => { setPage(0); setTooltip(null) }, [today])
   const paidCosts = paidAmounts(costs).filter(cost => cost.date <= today)
   const weeks = weeklySeries(receipts.filter(receipt => receipt.date <= today), paidCosts, paidCosts.filter(cost => cost.kind === 'labor' || cost.payrollOrigin), today, page)
+  React.useLayoutEffect(() => {
+    const chart = chartRef.current
+    if (!chart) return
+    let interacted = false
+    let disposed = false
+    let frame = 0
+    const position = () => {
+      cancelAnimationFrame(frame)
+      frame = requestAnimationFrame(() => {
+        if (disposed || interacted || chart.clientWidth === 0) return
+        chart.scrollLeft = chart.scrollWidth - chart.clientWidth
+      })
+    }
+    const stopPositioning = () => { interacted = true }
+    const events = ['pointerdown', 'touchstart', 'wheel', 'keydown'] as const
+    events.forEach(event => chart.addEventListener(event, stopPositioning, { passive: true }))
+    const observer = new ResizeObserver(position)
+    observer.observe(chart)
+    const svg = chart.querySelector('svg')
+    if (svg) observer.observe(svg)
+    // WebKit can finish sizing an offscreen SVG after its scrolling container.
+    const visible = new IntersectionObserver(entries => {
+      if (entries.some(entry => entry.isIntersecting)) { position(); visible.disconnect() }
+    })
+    visible.observe(chart)
+    void document.fonts.ready.then(() => { if (!disposed) position() })
+    position()
+    return () => {
+      disposed = true
+      cancelAnimationFrame(frame)
+      observer.disconnect()
+      visible.disconnect()
+      events.forEach(event => chart.removeEventListener(event, stopPositioning))
+    }
+  }, [today, page, rangeKey])
   const maximum = Math.max(0, ...weeks.flatMap(week => [week.incoming, week.expenses, week.payroll, week.profit]))
   const minimum = Math.min(0, ...weeks.map(week => week.profit))
   const span = Math.max(maximum - minimum, 1)
@@ -69,13 +105,17 @@ export function WeeklyComparison({ receipts, costs, today }: { receipts: DatedAm
     <div className="panel-head weekly-head"><div><h2>Gastos y ganancias por semana</h2><p>Entradas incluye todos los cobros de eventos y utilidades. Ganancia = entradas menos reembolsos y gastos. Los gastos incluyen nóminas.</p></div><div className="weekly-controls"><button type="button" onClick={() => setPage(value => value + 1)} aria-label="Ver ocho semanas anteriores"><ChevronLeft size={18}/></button><span>{first} - {last}</span><button type="button" onClick={() => setPage(value => Math.max(value - 1, 0))} disabled={page === 0} aria-label="Ver ocho semanas siguientes"><ChevronRight size={18}/></button></div></div>
     <div className="weekly-legend"><span><i className="weekly-receipt-dot"/>Entradas</span><span><i className="weekly-expense-dot"/>Gastos</span><span><i className="weekly-profit-dot"/>Ganancia neta</span><span><i className="weekly-payroll-dot"/>Nómina</span></div>
     <p className="weekly-swipe-hint">Desliza la gráfica para ver todas las semanas.</p>
-    <div className="weekly-chart-scroll"><svg viewBox="0 0 810 250" role="img" aria-label={`Gráfica semanal de entradas, gastos y ganancias entre ${first} y ${last}`}>
+    <div ref={chartRef} className="weekly-chart-scroll"><svg viewBox="0 0 810 250" role="img" aria-label={`Gráfica semanal de entradas, gastos y ganancias entre ${first} y ${last}`}>
       {[0, 1, 2, 3, 4].map(index => { const value = minimum + span * index / 4; return <g key={index}><line x1="52" x2="755" y1={y(value)} y2={y(value)} className={Math.abs(value) < 0.01 ? 'weekly-zero' : 'weekly-gridline'}/><text x="45" y={y(value) + 4} textAnchor="end" className="weekly-axis">{compact.format(value)}</text></g> })}
       {weeks.map((week, index) => { const label = `${dateLabel(week.start)} - ${dateLabel(week.end)} · Nómina ${money.format(week.payroll)}`; return <rect key={week.start} x={x(index) - 17} y={y(week.payroll)} width="34" height={Math.max(y(0) - y(week.payroll), 0)} rx="4" className="weekly-payroll-bar weekly-interactive" tabIndex={0} role="img" aria-label={label} onMouseEnter={() => showTooltip(index, 'payroll')} onMouseLeave={() => setTooltip(null)} onFocus={() => showTooltip(index, 'payroll')} onBlur={() => setTooltip(null)}/> })}
       {lineMetrics.map(metric => <polyline key={metric} points={points(metric)} className={`${className[metric]}-line`}/>)}
       {weeks.map((week, index) => { const period = `${dateLabel(week.start)} - ${dateLabel(week.end)}`; return <g key={week.start}>{lineMetrics.map(metric => <circle key={metric} cx={pointX(week, index, metric)} cy={y(week[metric])} r="5" tabIndex={0} role="img" aria-label={`${period} · ${metricName[metric]} ${money.format(week[metric])}`} onMouseEnter={() => showTooltip(index, metric)} onMouseLeave={() => setTooltip(null)} onFocus={() => showTooltip(index, metric)} onBlur={() => setTooltip(null)} className={`${className[metric]}-point weekly-interactive`}/>)}<text x={x(index)} y="235" textAnchor="middle" className="weekly-axis">{dateLabel(week.start)}</text></g> })}
       {tooltip && activeWeek && <g className="weekly-tooltip" role="status" transform={`translate(${tooltipX} ${tooltipY})`}><rect width="190" height="46" rx="7"/><text x="9" y="17" className="weekly-tooltip-period">{dateLabel(activeWeek.start)} - {dateLabel(activeWeek.end)}</text><text x="9" y="36" className="weekly-tooltip-value">{metricName[tooltip.metric]} {money.format(activeWeek[tooltip.metric])}</text></g>}
     </svg></div>
+    <div className="weekly-cards" aria-label="Resumen semanal, de más reciente a más antigua">{[...weeks].reverse().map(week => <article className="weekly-card" data-start={week.start} key={week.start}>
+      <h3>{dateLabel(week.start)} - {dateLabel(week.end)}</h3>
+      <dl>{([['Entradas', week.incoming], ['Reembolsos', week.refunds], ['Cobros netos', week.received], ['Gastos', week.expenses], ['Nómina', week.payroll], ['Ganancia', week.profit]] as const).map(([label, amount]) => <div key={label}><dt>{label}</dt><dd className={label === 'Ganancia' ? amount < 0 ? 'weekly-loss' : 'weekly-gain' : undefined}>{money.format(amount)}</dd></div>)}</dl>
+    </article>)}</div>
     <div className="weekly-table-scroll"><table className="weekly-table"><thead><tr><th>Semana</th><th>Entradas</th><th>Reembolsos</th><th>Cobros netos</th><th>Gastos</th><th>Nómina</th><th>Ganancia</th></tr></thead><tbody>{weeks.map(week => <tr key={week.start}><td>{dateLabel(week.start)} - {dateLabel(week.end)}</td><td data-label="Entradas">{money.format(week.incoming)}</td><td data-label="Reembolsos">{money.format(week.refunds)}</td><td data-label="Cobros">{money.format(week.received)}</td><td data-label="Gastos">{money.format(week.expenses)}</td><td data-label="Nómina">{money.format(week.payroll)}</td><td data-label="Ganancia" className={week.profit < 0 ? 'weekly-loss' : 'weekly-gain'}>{money.format(week.profit)}</td></tr>)}</tbody></table></div>
   </section>
 }

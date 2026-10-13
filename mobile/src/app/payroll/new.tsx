@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Pressable, Text, View } from 'react-native'
+import { Pressable, Text, View, useWindowDimensions } from 'react-native'
 import { router } from 'expo-router'
 import * as Crypto from 'expo-crypto'
 import { createWorker, listTemplates, listWorkers, savePayroll, type TeamTemplate, type Worker } from '../../api'
@@ -23,6 +23,8 @@ const unitName = (unit:Unit) => unit==='SPL'?'SPL eventos propios':'5to Elemento
 const displayMoney=(value:string)=>normalizeMoney(value||'0')??value
 
 export default function NewPayroll() {
+  const {width,fontScale}=useWindowDimensions()
+  const pairedDates=width>=360&&fontScale<=1.3
   const {businessScope,user}=useSession()
   const dates=week()
   const [periodStart,setStart]=useState(dates.start), [periodEnd,setEnd]=useState(dates.end)
@@ -78,8 +80,11 @@ export default function NewPayroll() {
     <Field label="Nombre de la nómina (opcional)" maxLength={120} value={name} onChangeText={setName}/>
     <Text style={ui.label}>Unidad de negocio</Text>
     <View style={ui.row}>{(['SPL','5to Elemento'] as const).map(choice=><Pressable key={choice} accessibilityRole="radio" accessibilityState={{selected:unit===choice}} style={[ui.secondaryButton,{flex:1,borderColor:unit===choice?'#f97316':'#394555'}]} onPress={()=>setUnit(choice)}><Text style={ui.buttonText}>{unitName(choice)}</Text></Pressable>)}</View>
-    <Field label="Inicio (AAAA-MM-DD)" value={periodStart} onChangeText={setStart}/>
-    <Field label="Fin (AAAA-MM-DD)" value={periodEnd} onChangeText={setEnd}/>
+    <View style={{flexDirection:pairedDates?'row':'column',gap:12}}>
+      <View style={{flex:1,minWidth:0}}><Field label="Inicio" centered accessibilityLabel="Inicio (AAAA-MM-DD)" value={periodStart} onChangeText={setStart}/></View>
+      <View style={{flex:1,minWidth:0}}><Field label="Fin" centered accessibilityLabel="Fin (AAAA-MM-DD)" value={periodEnd} onChangeText={setEnd}/></View>
+    </View>
+    <Text style={[ui.label,{textAlign:'center'}]}>Fechas en formato AAAA-MM-DD</Text>
     {templates.length>0&&<><Text style={ui.section}>Plantillas</Text>{templates.map(template=><Pressable key={template.id} style={ui.secondaryButton} onPress={()=>apply(template,workers)}><Text style={ui.buttonText}>{template.name} · {unitName(template.businessUnit)}{template.isDefault?' · Predeterminada':''}</Text></Pressable>)}</>}
     <Text style={ui.section}>Agregar trabajador</Text>
     {workers.filter(worker=>!lines.some(line=>line.employeeId===worker.id)).map(worker=><Pressable key={worker.id} style={ui.secondaryButton} onPress={()=>add(worker)}><Text style={ui.buttonText}>+ {worker.name}</Text></Pressable>)}

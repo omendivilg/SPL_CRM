@@ -13,7 +13,8 @@ import { financePeriodData } from './finance-model'
 import { EXPENSE_CATEGORIES, DEFAULT_EXPENSE_CATEGORY } from './expense-categories'
 import React from 'react'
 import ReactDOM from 'react-dom/client'
-import { CalendarDays, Check, ChevronDown, CircleDollarSign, Database, Download, LayoutDashboard, Menu, MoreHorizontal, Plus, Search, Settings, ShieldCheck, Trash2, Users, WalletCards, Wifi, X } from 'lucide-react'
+import { usePhoneLayout } from './phone-layout'
+import { ArrowLeft, CalendarDays, Check, ChevronDown, CircleDollarSign, Database, Download, LayoutDashboard, Menu, MoreHorizontal, Plus, Search, Settings, ShieldCheck, Trash2, Users, WalletCards, Wifi, X } from 'lucide-react'
 import { authApi, desktopGoogleApi, directIncomeApi, eventApi, healthApi, payrollApi, quickExpenseApi, reportApi, testLoginApi, weeklyPayrollApi, type ApiDirectIncome, type ApiEvent, type ApiExpense, type ApiPayment, type ApiPayroll, type ApiQuickExpense, type ApiWeeklyPayroll, type CreateEventInput, type SessionUser } from './api'
 import {openDesktopAuthorization,waitForDesktopGoogle} from './desktop-auth'
 import { ApiError } from './api'
@@ -97,15 +98,78 @@ function Dashboard({ scope, events, warehouseCosts, quickExpenses, directIncomes
     const aPast=a.date<today,bPast=b.date<today
     return aPast!==bPast?(aPast?-1:1):aPast?b.date.localeCompare(a.date):a.date.localeCompare(b.date)
   })
-  return <div className="content"><section className="page-heading"><div><p className="eyebrow">Panel financiero</p><h1>Buen día, Oscar</h1><p>Consulta cobros y pagos según su fecha real.</p></div></section><PeriodSelector value={selectedPeriod} onChange={setSelectedPeriod} today={today}/><section className="metrics-grid">{metrics.map(metric=><article className="metric-card" key={metric.label}><div className="metric-title"><span>{metric.label}</span><CircleDollarSign size={19}/></div><strong>{money.format(metric.value)}</strong><div className={`metric-foot ${metric.trend}`}><b>{metric.change}</b><span>{metric.caption}</span></div></article>)}</section><CostBreakdown costs={periodCosts}/><section className="lower-grid"><article className="panel events-panel"><div className="panel-head"><div><h2>Próximos eventos</h2><p>Agenda de la vista seleccionada</p></div></div>{upcoming.length===0?<div className="empty-state">No hay próximos eventos</div>:<div className="event-list">{upcoming.map(event=><div className="event-row" key={event.id}><div className="date-box"><strong>{event.date.slice(8)}</strong><span>{new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{month:'short'}).toUpperCase()}</span></div><i className={`event-line ${event.unit==='5to Elemento'?'blue':''}`}/><div className="event-info"><strong>{event.name}</strong><span>{event.unit}</span></div><span className={`status ${paymentStatus(event)==='Pagado'||event.status==='Confirmado'?'confirmed':''}`}>{paymentStatus(event)}</span></div>)}</div>}</article><article className="panel budget-panel"><div className="panel-head"><div><h2>Saldos pendientes de eventos</h2><p>Eventos pasados y próximos sin pago completo</p></div><span className="count">{unpaid.length}</span></div>{unpaid.length===0?<div className="empty-state">No hay saldos pendientes</div>:unpaid.map(event=><div className="alert-item" key={event.id}><div><strong>{event.client} · {event.venue}</strong><b>{money.format(balanceDue(event)??0)}</b></div><span>{event.date<today?'Evento pasado':'Próximo evento'} · {new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'})}</span></div>)}</article></section><WeeklyComparison receipts={receipts} costs={costs} today={period.end}/></div>
+  return <div className="content"><section className="page-heading"><div><p className="eyebrow">Panel financiero</p><h1>Buen día, Oscar</h1><p>Consulta cobros y pagos según su fecha real.</p></div></section><PeriodSelector value={selectedPeriod} onChange={setSelectedPeriod} today={today}/><section className="metrics-grid">{metrics.map(metric=><article className="metric-card" key={metric.label}><div className="metric-title"><span>{metric.label}</span><CircleDollarSign size={19}/></div><strong>{money.format(metric.value)}</strong><div className={`metric-foot ${metric.trend}`}><b>{metric.change}</b><span>{metric.caption}</span></div></article>)}</section><CostBreakdown costs={periodCosts}/><section className="lower-grid"><article className="panel events-panel"><div className="panel-head"><div><h2>Próximos eventos</h2><p>Agenda de la vista seleccionada</p></div></div>{upcoming.length===0?<div className="empty-state">No hay próximos eventos</div>:<div className="event-list">{upcoming.map(event=><div className="event-row" key={event.id}><div className="date-box"><strong>{event.date.slice(8)}</strong><span>{new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{month:'short'}).toUpperCase()}</span></div><i className={`event-line ${event.unit==='5to Elemento'?'blue':''}`}/><div className="event-info"><strong>{event.name}</strong><span>{event.unit}</span></div><span className={`status ${paymentStatus(event)==='Pagado'||event.status==='Confirmado'?'confirmed':''}`}>{paymentStatus(event)}</span></div>)}</div>}</article><article className="panel budget-panel"><div className="panel-head"><div><h2>Saldos pendientes de eventos</h2><p>Eventos pasados y próximos sin pago completo</p></div><span className="count">{unpaid.length}</span></div>{unpaid.length===0?<div className="empty-state">No hay saldos pendientes</div>:unpaid.map(event=><div className="alert-item" key={event.id}><div><strong>{event.client} · {event.venue}</strong><b>{money.format(balanceDue(event)??0)}</b></div><span>{event.date<today?'Evento pasado':'Próximo evento'} · {new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{day:'numeric',month:'short',year:'numeric'})}</span></div>)}</article></section><WeeklyComparison receipts={receipts} costs={costs} today={period.end} rangeKey={`${scope}:${selectedPeriod.mode}:${selectedPeriod.anchor}`}/></div>
 }
 function EventsPage({ events, setEvents, selectedId, setSelectedId, openCreate, loadState, retry, role, scope }: { events: EventRecord[]; setEvents: React.Dispatch<React.SetStateAction<EventRecord[]>>; selectedId: string; setSelectedId: (id:string)=>void; openCreate:()=>void; loadState:'loading'|'ready'|'error'; retry:()=>void; role:SessionUser['role'];scope:Scope }) {
-  const [expenseOpen,setExpenseOpen]=React.useState(false); const filtered=events.filter(event=>visibleInScope(event.unit,scope)); const selected=filtered.find(event=>event.id===selectedId) ?? filtered[0]
-  React.useEffect(()=>{const update=()=>setEvents(current=>[...current]);window.addEventListener('spl-financial-change',update);return()=>window.removeEventListener('spl-financial-change',update)},[setEvents])
-  React.useEffect(()=>{if(!selectedId||role==='coordinator')return;let active=true;Promise.all([eventApi.listExpenses(selectedId),eventApi.listPayments(selectedId)]).then(([expenses,payments])=>{if(active)setEvents(current=>current.map(event=>event.id===selectedId?{...event,expenses:expenses.map(item=>({...fromApiExpense(item),cashDate:event.expenses.find(old=>old.id===item.id)?.cashDate,cashPayments:event.expenses.find(old=>old.id===item.id)?.cashPayments})),payments:payments.map(fromApiPayment)}:event))}).catch(()=>{});return()=>{active=false}},[selectedId,setEvents,role])
-  const addExpense=async(value:{name:string;category:string;amount:string;expenseDate:string})=>{if(!selected)return;const item=await eventApi.addExpense(selected.id,{...value,amount:Number(value.amount).toFixed(2)});setEvents(current=>current.map(event=>event.id===selected.id?{...event,expenses:[...event.expenses,fromApiExpense(item)]}:event))}
-  const deleteEvent=async(event:EventRecord)=>{await eventApi.deleteEvent(event.id,event.version);setEvents(current=>current.filter(item=>item.id!==event.id));setSelectedId(events.find(item=>item.id!==event.id)?.id??'');window.dispatchEvent(new Event('spl-financial-change'))}
-  return <div className="content events-workspace"><section className="page-heading"><div><p className="eyebrow">{role==='owner'?'Operación y finanzas':'Agenda operativa'}</p><h1>Eventos</h1><p>{role==='owner'?'Consulta cada evento y abre los registros que explican sus totales.':'Administra únicamente la información operativa de 5to Elemento.'}</p></div><button className="primary page-action" onClick={openCreate}><Plus size={18}/>Nuevo evento</button></section>{loadState==='error'&&<div className="connection-banner" role="alert"><div><strong>No pudimos cargar los eventos</strong><span>Revisa tu conexión. Tus datos no fueron modificados.</span></div><button onClick={retry}>Reintentar</button></div>}{loadState==='loading'&&<div className="loading-state" aria-live="polite">Cargando eventos...</div>}{loadState==='ready'&&<><div className="event-toolbar"><span>{scope==='Todos'?'Todos los negocios':scope}</span><span>{filtered.length} eventos</span></div>{filtered.length===0?<div className="panel no-events"><CalendarDays size={24}/><strong>No hay eventos en esta vista</strong><span>Crea la primera reservación para comenzar.</span><button className="primary" onClick={openCreate}>Nuevo evento</button></div>:<section className="event-workspace-grid"><article className={`panel event-table-panel ${role==='coordinator'?'operational':''}`}><div className="event-table-head"><span>Evento</span><span>Fecha</span><span>Estado</span>{role==='owner'&&<span>Saldo</span>}</div>{filtered.map(event=>{const balance=Math.max((event.price??0)-totalPayments(event),0);return <button className={`event-table-row ${selected?.id===event.id?'selected':''}`} onClick={()=>setSelectedId(event.id)} key={event.id}><div><i className={event.unit==='SPL'?'unit-spl':'unit-5to'}/><span><strong>{event.name}</strong><small>{event.client} · {event.id}</small></span></div><span>{new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span><span className={`status ${paymentStatus(event)==='Pagado'||event.status==='Confirmado'?'confirmed':''}`}>{paymentStatus(event)}</span>{role==='owner'&&<b>{event.price===null?'Precio pendiente':money.format(balance)}</b>}</button>})}</article>{selected&&<EventDetail event={selected} addExpense={()=>setExpenseOpen(true)} deleteEvent={()=>deleteEvent(selected)} role={role}/>}</section>}</>}{expenseOpen&&selected&&<ExpenseModal close={()=>setExpenseOpen(false)} save={addExpense}/>}</div>
+  const phone = usePhoneLayout()
+  const [detailOpen, setDetailOpen] = React.useState(false)
+  const [expenseOpen, setExpenseOpen] = React.useState(false)
+  const [detailError, setDetailError] = React.useState('')
+  const [detailReload, setDetailReload] = React.useState(0)
+  const listPosition = React.useRef(0)
+  const listRef = React.useRef<HTMLElement>(null)
+  const filtered = events.filter(event => visibleInScope(event.unit, scope))
+  const selected = filtered.find(event => event.id === selectedId) ?? (phone ? undefined : filtered[0])
+  const backToList = () => {
+    setDetailOpen(false)
+    setExpenseOpen(false)
+    requestAnimationFrame(() => {
+      const row = [...(listRef.current?.querySelectorAll<HTMLButtonElement>('[data-event-id]') ?? [])].find(item => item.dataset.eventId === selectedId)
+      row?.focus({ preventScroll: true })
+      window.scrollTo({ top: listPosition.current, behavior: 'instant' })
+    })
+  }
+  const selectEvent = (id: string) => {
+    setSelectedId(id)
+    if (phone) {
+      listPosition.current = window.scrollY
+      setDetailOpen(true)
+      requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'instant' }))
+    }
+  }
+  React.useEffect(() => { setDetailOpen(false); setExpenseOpen(false) }, [scope])
+  React.useEffect(() => { const update = () => setEvents(current => [...current]); window.addEventListener('spl-financial-change', update); return () => window.removeEventListener('spl-financial-change', update) }, [setEvents])
+  React.useEffect(() => {
+    setDetailError('')
+    if (!selectedId || role === 'coordinator') return
+    let active = true
+    Promise.all([eventApi.listExpenses(selectedId), eventApi.listPayments(selectedId)]).then(([expenses, payments]) => {
+      if (active) setEvents(current => current.map(event => event.id === selectedId ? { ...event, expenses: expenses.map(item => ({ ...fromApiExpense(item), cashDate: event.expenses.find(old => old.id === item.id)?.cashDate, cashPayments: event.expenses.find(old => old.id === item.id)?.cashPayments })), payments: payments.map(fromApiPayment) } : event))
+    }).catch(() => { if (active) setDetailError('No pudimos actualizar los movimientos del evento. Revisa tu conexión y vuelve a intentar.') })
+    return () => { active = false }
+  }, [selectedId, setEvents, role, detailReload])
+  const addExpense = async (value: {name:string;category:string;amount:string;expenseDate:string}) => {
+    if (!selected) return
+    const item = await eventApi.addExpense(selected.id, { ...value, amount: Number(value.amount).toFixed(2) })
+    setEvents(current => current.map(event => event.id === selected.id ? { ...event, expenses: [...event.expenses, fromApiExpense(item)] } : event))
+  }
+  const deleteEvent = async (event: EventRecord) => {
+    await eventApi.deleteEvent(event.id, event.version)
+    setEvents(current => current.filter(item => item.id !== event.id))
+    setSelectedId(events.find(item => item.id !== event.id)?.id ?? '')
+    if (phone) backToList()
+    window.dispatchEvent(new Event('spl-financial-change'))
+  }
+  const showingDetail = phone && detailOpen
+  return <div className="content events-workspace">
+    {showingDetail ? <button type="button" className="event-list-back" onClick={backToList}><ArrowLeft size={18}/>Volver a eventos</button> : <section className="page-heading"><div><p className="eyebrow">{role==='owner'?'Operación y finanzas':'Agenda operativa'}</p><h1>Eventos</h1><p>{role==='owner'?'Consulta cada evento y abre los registros que explican sus totales.':'Administra únicamente la información operativa de 5to Elemento.'}</p></div><button className="primary page-action" onClick={openCreate}><Plus size={18}/>Nuevo evento</button></section>}
+    {loadState==='error'&&<div className="connection-banner" role="alert"><div><strong>No pudimos cargar los eventos</strong><span>Revisa tu conexión. Tus datos no fueron modificados.</span></div><button onClick={retry}>Reintentar</button></div>}
+    {loadState==='loading'&&<div className="loading-state" aria-live="polite">Cargando eventos...</div>}
+    {loadState==='ready'&&<>
+      {!showingDetail && <div className="event-toolbar"><span>{scope==='Todos'?'Todos los negocios':scope}</span><span>{filtered.length} eventos</span></div>}
+      {showingDetail && !selected ? <div className="panel no-events"><CalendarDays size={24}/><strong>Este evento ya no está disponible en esta vista</strong><span>Regresa a la lista para seleccionar otro evento.</span></div> : filtered.length===0 ? <div className="panel no-events"><CalendarDays size={24}/><strong>No hay eventos en esta vista</strong><span>Crea la primera reservación para comenzar.</span><button className="primary" onClick={openCreate}>Nuevo evento</button></div> : <section className={`event-workspace-grid ${showingDetail ? 'showing-detail' : ''}`}>
+        {!showingDetail && <article ref={listRef} className={`panel event-table-panel ${role==='coordinator'?'operational':''}`}>
+          <div className="event-table-head"><span>Evento</span><span>Fecha</span><span>Estado</span>{role==='owner'&&<span>Saldo</span>}</div>
+          {filtered.map(event => { const balance=Math.max((event.price??0)-totalPayments(event),0); return <button className={`event-table-row ${selected?.id===event.id?'selected':''}`} data-event-id={event.id} onClick={()=>selectEvent(event.id)} key={event.id}><div><i className={event.unit==='SPL'?'unit-spl':'unit-5to'}/><span><strong>{event.name}</strong><small>{event.client} · {phone ? event.venue : event.id}</small></span></div><span className="event-row-date">{new Date(`${event.date}T12:00:00`).toLocaleDateString('es-MX',{day:'2-digit',month:'short'})}</span><span className={`status ${paymentStatus(event)==='Pagado'||event.status==='Confirmado'?'confirmed':''}`}>{paymentStatus(event)}</span>{role==='owner'&&<b>{event.price===null?'Precio pendiente':money.format(balance)}</b>}</button> })}
+        </article>}
+        {(!phone || showingDetail) && selected && <div className="event-detail-container">
+          {detailError && <div className="connection-banner" role="alert"><div><strong>No pudimos actualizar el detalle</strong><span>{detailError}</span></div><button onClick={()=>setDetailReload(value=>value+1)}>Reintentar</button></div>}
+          <EventDetail key={selected.id} event={selected} addExpense={()=>setExpenseOpen(true)} deleteEvent={()=>deleteEvent(selected)} role={role}/>
+        </div>}
+      </section>}
+    </>}
+    {expenseOpen&&selected&&<ExpenseModal close={()=>setExpenseOpen(false)} save={addExpense}/>}
+  </div>
 }
 function EventDetail({event,addExpense,deleteEvent,role}:{event:EventRecord;addExpense:()=>void;deleteEvent:()=>Promise<void>;role:SessionUser['role']}) {
   const [,refresh]=React.useState(0),[movement,setMovement]=React.useState<'payment'|'refund'|null>(null),[priceOpen,setPriceOpen]=React.useState(false),[payOpen,setPayOpen]=React.useState(false),[confirmDelete,setConfirmDelete]=React.useState(false),[removingPayment,setRemovingPayment]=React.useState<string|null>(null),[error,setError]=React.useState('')

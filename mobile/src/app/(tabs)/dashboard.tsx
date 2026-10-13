@@ -5,7 +5,7 @@ import {useSession} from '../../session'
 import {useFinancialPeriod} from '../../financial-period'
 import {useFinancialData} from '../../use-financial-data'
 import {financialModel} from '../../finance-model'
-import {FinancialPeriodControl,WeeklyCashChart,formatMoney} from '../../financial-components'
+import {FinancialPeriodControl,WeeklyCashChart,WeeklySummaryCards,formatMoney} from '../../financial-components'
 import {colors} from '../../theme'
 
 export default function Dashboard(){
@@ -21,7 +21,8 @@ export default function Dashboard(){
       <Card><Text style={ui.label}>Gastos pagados</Text><Money value={model.paid} color={colors.orange}/><Text style={ui.label}>Incluye sueldos, costos laborales y gastos.</Text></Card>
       <Card><Text style={ui.label}>Ganancias del periodo</Text><Money value={model.cashResult}/><Text style={ui.label}>Cobros netos después de devoluciones menos pagos.</Text></Card>
       <Card><Text style={ui.label}>Saldo por cobrar</Text><Money value={model.receivable}/></Card>
-      <WeeklyCashChart points={model.weekly}/>
+      <WeeklyCashChart key={`${businessScope}:${model.weekly[0]?.start}:${model.weekly.at(-1)?.end}`} points={model.weekly}/>
+      <WeeklySummaryCards points={model.weekly}/>
     </>}
   </Screen>
 }

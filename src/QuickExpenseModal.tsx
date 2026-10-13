@@ -1,11 +1,13 @@
 import React from 'react'
 import Decimal from 'decimal.js'
+import { useEntryFormFocus } from './phone-layout'
 import { X } from 'lucide-react'
 import type { ApiQuickExpense } from './api'
 import { EXPENSE_CATEGORIES, DEFAULT_EXPENSE_CATEGORY } from './expense-categories'
 
 type Input = Pick<ApiQuickExpense, 'name' | 'category' | 'amount' | 'expenseDate' | 'businessUnit' | 'notes' | 'paymentMethod'>
 export function QuickExpenseModal({ close, save, defaultUnit }: { close: () => void; save: (id: string, input: Input) => Promise<void>; defaultUnit: Input['businessUnit'] }) {
+  const { formRef, nameRef } = useEntryFormFocus()
   const now = new Date()
   const [expenseId] = React.useState(() => crypto.randomUUID())
   const [form, setForm] = React.useState<Input>({ name: '', category: DEFAULT_EXPENSE_CATEGORY, amount: '', expenseDate: `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`, businessUnit: defaultUnit, notes: '', paymentMethod: 'cash' })
@@ -21,10 +23,10 @@ export function QuickExpenseModal({ close, save, defaultUnit }: { close: () => v
   }
   return <div className="modal-layer" role="dialog" aria-modal="true" aria-label="Gasto nuevo">
     <button className="modal-backdrop" type="button" aria-label="Cerrar" onClick={close}/>
-    <form className="event-modal compact-modal" onSubmit={event => void submit(event)}>
+    <form ref={formRef} tabIndex={-1} className="event-modal compact-modal" onSubmit={event => void submit(event)}>
       <div className="modal-head"><div><p className="eyebrow">Gasto independiente</p><h2>Gasto nuevo</h2></div><button type="button" aria-label="Cerrar" onClick={close}><X size={20}/></button></div>
       <div className="form-grid">
-        <label className="full">Nombre del gasto<input autoFocus required maxLength={200} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
+        <label className="full">Nombre del gasto<input ref={nameRef} required maxLength={200} value={form.name} onChange={event => setForm({ ...form, name: event.target.value })}/></label>
         <label>Categoría<select value={form.category} onChange={event => setForm({ ...form, category: event.target.value })}>{EXPENSE_CATEGORIES.map(category=><option key={category}>{category}</option>)}</select></label>
         <label>Monto MXN<input required type="number" min="0.01" step="0.01" value={form.amount} onChange={event => setForm({ ...form, amount: event.target.value })}/></label>
         <label>Fecha de pago<input required type="date" value={form.expenseDate} onChange={event => setForm({ ...form, expenseDate: event.target.value })}/></label>
